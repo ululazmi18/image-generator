@@ -3,7 +3,7 @@
 - [x] Persiapan Profil Peramban & Skrip Peluncur Langsung
   - [x] Susun aturan master D:\.agents\rules dan inisialisasi .gitignore
   - [x] Rancang blueprint kanonikal (.agents/memory/PRD.md, DESIGN.md, task.md)
-  - [x] Kloning profil `ulul_azmi` dari `D:\FirefoxPortable\Data\profiles\ulul_azmi` ke `browser_profile` (tanpa parent.lock & cache2)
+  - [x] Kloning profil `lia_nurjanah` dari `D:\FirefoxPortable\Data\profiles\lia_nurjanah` ke `browser_profile` (bersih dari lock/cache, menggantikan profil sebelumnya yang terdeteksi)
   - [x] Buat starter script langsung di dalam folder profil (`browser_profile\starter.bat` & `browser_profile\start_browser.bat`)
   - [x] Buat starter script berbasis Python/Rich (`browser_profile\starter.py`)
   - [x] Hapus root `start_browser.bat` sesuai permintaan pengguna
