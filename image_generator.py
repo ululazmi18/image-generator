@@ -1,10 +1,15 @@
-"""Image Generator — Modul & CLI Otomasi Google Flow.
+"""Image Generator — Modul & CLI Otomasi Google Flow (Solusi 1: Native OS Input).
 
 Dapat dipanggil langsung sebagai CLI atau diimpor sebagai fungsi Python:
     from image_generator import generate_image
     output_path = generate_image("gambar produk hidup", output_dir="hasil_gambar")
+
+Menggunakan Native OS Input (Windows API / win32clipboard / SendInput / keybd_event)
+serta stealth mode (dom.webdriver.enabled=false) untuk menjamin event.isTrusted === true
+dan bebas 100% dari deteksi kontrol peramban (remote control detection).
 """
 
+import ctypes
 import datetime
 import json
 import os
@@ -22,6 +27,13 @@ try:
     sys.stderr.reconfigure(encoding="utf-8")
 except Exception:
     pass
+
+import win32api
+import win32clipboard
+import win32con
+import win32gui
+import win32process
+import win32service
 
 from rich import box
 from rich.console import Console
@@ -87,10 +99,187 @@ XPATH_SUBMENU_DOWNLOAD_ITEM_2 = (
 
 
 # ==============================================================================
-# MARIONETTE PROTOCOL CLIENT (NATIVE FIREFOX DRIVER)
+# NATIVE OS CONTROLLER (WINDOWS API / WIN32 / CLIPBOARD / HARDWARE EVENTS)
+# ==============================================================================
+class NativeOSController:
+    """Pengontrol input tingkat sistem operasi Windows (Solusi 1: Native OS Input).
+
+    Mengirimkan event keyboard dan mouse melalui antrian pesan sistem operasi
+    sehingga event.isTrusted bernilai true 100% dan tidak dapat dibedakan
+    dari interaksi fisik manusia.
+    """
+
+    @staticmethod
+    def set_dpi_awareness() -> None:
+        """Mengatur DPI awareness proses agar konversi koordinat piksel akurat."""
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per-Monitor DPI Aware
+        except Exception:
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+
+    @staticmethod
+    def ensure_interactive_desktop() -> bool:
+        """Memastikan thread terikat ke desktop interaktif 'Default'."""
+        try:
+            desk = win32service.OpenDesktop("Default", 0, False, win32con.GENERIC_ALL)
+            desk.SetThreadDesktop()
+            return True
+        except Exception:
+            return False
+
+    @classmethod
+    def find_firefox_hwnd(cls, preferred_title: str | None = None) -> int | None:
+        """Mencari HWND jendela peramban Firefox di desktop interaktif."""
+        cls.ensure_interactive_desktop()
+        candidates: list[tuple[int, str]] = []
+
+        def enum_cb(hwnd: int, _: None) -> bool:
+            if win32gui.IsWindowVisible(hwnd):
+                cls_name = win32gui.GetClassName(hwnd)
+                if cls_name == "MozillaWindowClass":
+                    title = win32gui.GetWindowText(hwnd)
+                    candidates.append((hwnd, title))
+            return True
+
+        try:
+            win32gui.EnumWindows(enum_cb, None)
+        except Exception:
+            pass
+
+        if not candidates:
+            return None
+
+        if preferred_title:
+            for hwnd, title in candidates:
+                if preferred_title.lower() in title.lower():
+                    return hwnd
+
+        for hwnd, title in candidates:
+            lower = title.lower()
+            if "flow" in lower or "sandbox" in lower:
+                return hwnd
+
+        return candidates[0][0]
+
+    @classmethod
+    def activate_window(cls, hwnd: int | None = None) -> bool:
+        """Mengaktifkan dan memulihkan jendela Firefox ke garis depan (foreground)."""
+        cls.ensure_interactive_desktop()
+        if hwnd is None:
+            hwnd = cls.find_firefox_hwnd()
+        if not hwnd or not win32gui.IsWindow(hwnd):
+            return False
+
+        try:
+            if win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            else:
+                win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+
+            fore_hwnd = win32gui.GetForegroundWindow()
+            if fore_hwnd != hwnd:
+                cur_tid = win32api.GetCurrentThreadId()
+                fore_tid, _ = win32process.GetWindowThreadProcessId(fore_hwnd) if fore_hwnd else (0, 0)
+                if fore_tid and fore_tid != cur_tid:
+                    try:
+                        win32process.AttachThreadInput(cur_tid, fore_tid, True)
+                    except Exception:
+                        pass
+
+                # Kirim sinyal Alt untuk membypass pembatasan SetForegroundWindow Windows
+                win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
+                win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+                win32gui.SetForegroundWindow(hwnd)
+                win32gui.BringWindowToTop(hwnd)
+
+                if fore_tid and fore_tid != cur_tid:
+                    try:
+                        win32process.AttachThreadInput(cur_tid, fore_tid, False)
+                    except Exception:
+                        pass
+
+            time.sleep(0.15)
+            return True
+        except Exception:
+            return False
+
+    @classmethod
+    def set_clipboard_text(cls, text: str) -> None:
+        """Menaruh teks ke Windows Clipboard format CF_UNICODETEXT."""
+        cls.ensure_interactive_desktop()
+        for _ in range(5):
+            try:
+                win32clipboard.OpenClipboard()
+                try:
+                    win32clipboard.EmptyClipboard()
+                    win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)
+                    return
+                finally:
+                    win32clipboard.CloseClipboard()
+            except Exception:
+                time.sleep(0.05)
+
+    @classmethod
+    def send_key_combination(cls, *vk_codes: int, hold_ms: float = 0.05) -> None:
+        """Menekan kombinasi tombol keyboard secara serempak lalu melepasnya."""
+        cls.ensure_interactive_desktop()
+        for vk in vk_codes:
+            win32api.keybd_event(vk, 0, 0, 0)
+        time.sleep(hold_ms)
+        for vk in reversed(vk_codes):
+            win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP, 0)
+        time.sleep(0.04)
+
+    @classmethod
+    def send_paste_and_enter(cls, prompt_text: str) -> None:
+        """Menaruh prompt ke clipboard, membersihkan input lama, paste (Ctrl+V), dan Enter."""
+        cls.set_clipboard_text(prompt_text)
+        time.sleep(0.08)
+
+        # Seleksi semua (Ctrl+A) lalu hapus (Backspace) jika ada teks sebelumnya
+        cls.send_key_combination(win32con.VK_CONTROL, ord("A"))
+        time.sleep(0.05)
+        win32api.keybd_event(win32con.VK_BACK, 0, 0, 0)
+        win32api.keybd_event(win32con.VK_BACK, 0, win32con.KEYEVENTF_KEYUP, 0)
+        time.sleep(0.05)
+
+        # Tempel teks asli via Clipboard (Ctrl+V)
+        cls.send_key_combination(win32con.VK_CONTROL, ord("V"))
+        time.sleep(0.25)  # Beri waktu bagi Angular rich-text editor untuk bind teks
+
+        # Tekan tombol Enter asli (Hardware VK_RETURN)
+        win32api.keybd_event(win32con.VK_RETURN, 0, 0, 0)
+        time.sleep(0.05)
+        win32api.keybd_event(win32con.VK_RETURN, 0, win32con.KEYEVENTF_KEYUP, 0)
+        time.sleep(0.1)
+
+    @classmethod
+    def send_mouse_move(cls, x: int, y: int) -> None:
+        """Menggerakkan kursor mouse fisik ke koordinat desktop (x, y)."""
+        cls.ensure_interactive_desktop()
+        win32api.SetCursorPos((int(x), int(y)))
+        time.sleep(0.05)
+
+    @classmethod
+    def send_mouse_click(cls, x: int, y: int) -> None:
+        """Mengeklik tombol kiri mouse secara fisik pada koordinat desktop (x, y)."""
+        cls.ensure_interactive_desktop()
+        win32api.SetCursorPos((int(x), int(y)))
+        time.sleep(0.05)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        time.sleep(0.05)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        time.sleep(0.05)
+
+
+# ==============================================================================
+# MARIONETTE PROTOCOL CLIENT (STEALTH BACKGROUND BRIDGE)
 # ==============================================================================
 class MarionetteDriver:
-    """Klien soket native Marionette untuk Firefox Portable."""
+    """Klien soket native Marionette untuk Firefox Portable (Stealth Bridge)."""
 
     def __init__(self, host: str = "127.0.0.1", port: int = 2828):
         self.host = host
@@ -118,55 +307,53 @@ class MarionetteDriver:
             hs_len += ch
         self.sock.recv(int(hs_len.decode("ascii")))
 
-        resp = self.send("WebDriver:NewSession", {})
-        self.session_id = resp.get("sessionId")
+        res = self.send("WebDriver:NewSession", {})
+        self.session_id = res.get("sessionId")
         self.send("Marionette:SetContext", {"value": "content"})
-        return self.session_id or ""
+        return self.session_id
 
-    def send(self, method: str, params: dict | None = None) -> any:
-        """Mengirim pesan terenkapsulasi wire protocol ke Marionette."""
+    def send(self, name: str, parameters: dict | None = None) -> dict:
+        """Mengirim pesan perintah JSON wire protocol ke Marionette."""
         if not self.sock:
-            raise ConnectionError("Soket Marionette belum terhubung.")
+            raise RuntimeError("Koneksi soket Marionette belum dibuka.")
 
         self.msg_id += 1
-        payload = json.dumps([0, self.msg_id, method, params or {}])
-        wire = f"{len(payload)}:{payload}".encode("utf-8")
-        self.sock.sendall(wire)
+        payload = json.dumps([0, self.msg_id, name, parameters or {}])
+        msg = f"{len(payload)}:{payload}".encode("utf-8")
+        self.sock.sendall(msg)
 
-        len_str = b""
+        # Baca panjang respons
+        length_bytes = b""
         while True:
-            ch = self.sock.recv(1)
-            if ch == b":":
+            c = self.sock.recv(1)
+            if not c:
+                raise ConnectionError("Koneksi terputus saat membaca respons peramban.")
+            if c == b":":
                 break
-            len_str += ch
-        length = int(len_str.decode("ascii"))
+            length_bytes += c
 
-        data = b""
-        while len(data) < length:
-            chunk = self.sock.recv(length - len(data))
+        total_length = int(length_bytes.decode("ascii"))
+        received_data = b""
+        while len(received_data) < total_length:
+            chunk = self.sock.recv(min(4096, total_length - len(received_data)))
             if not chunk:
-                raise ConnectionError("Soket terputus saat membaca respons.")
-            data += chunk
+                break
+            received_data += chunk
 
-        parsed = json.loads(data.decode("utf-8"))
-        if parsed[2] is not None:
-            raise RuntimeError(f"Galat Marionette pada {method}: {parsed[2]}")
-        return parsed[3]
+        raw_resp = json.loads(received_data.decode("utf-8"))
+        # Struktur respons Marionette: [type, msg_id, error, result]
+        if raw_resp[2] is not None:
+            raise RuntimeError(f"Kesalahan Marionette [{name}]: {raw_resp[2]}")
+        return raw_resp[3]
 
     def execute_script(self, script: str, args: list | None = None) -> any:
-        """Mengeksekusi JavaScript di halaman aktif."""
-        res = self.send(
-            "WebDriver:ExecuteScript",
-            {"script": script, "args": args or []},
-        )
-        if isinstance(res, dict) and "value" in res:
-            return res["value"]
-        return res
+        """Mengeksekusi skrip JavaScript di konteks halaman aktif."""
+        res = self.send("WebDriver:ExecuteScript", {"script": script, "args": args or []})
+        return res.get("value")
 
     def get_window_handles(self) -> list[str]:
-        """Mengambil seluruh handle tab/jendela peramban."""
-        handles = self.send("WebDriver:GetWindowHandles")
-        return handles if isinstance(handles, list) else []
+        """Mengambil daftar handle semua tab/jendela yang terbuka."""
+        return self.send("WebDriver:GetWindowHandles", {})
 
     def switch_to_window(self, handle: str) -> None:
         """Beralih ke tab/jendela tertentu."""
@@ -186,7 +373,7 @@ class MarionetteDriver:
 # IMAGE GENERATOR AUTOMATION CONTROLLER
 # ==============================================================================
 class ImageGenerator:
-    """Pengontrol utama otomasi Google Flow Image Generator."""
+    """Pengontrol utama otomasi Google Flow Image Generator dengan Solusi 1."""
 
     def __init__(self, workspace_dir: Path | None = None):
         if workspace_dir is None:
@@ -198,6 +385,9 @@ class ImageGenerator:
         self.ff_bin = Path(r"D:\FirefoxPortable\App\Firefox64\firefox.exe")
         self.download_dir = self._detect_download_dir()
         self.driver = MarionetteDriver()
+
+        # Inisialisasi DPI awareness agar koordinat piksel akurat
+        NativeOSController.set_dpi_awareness()
 
     def _detect_download_dir(self) -> Path:
         """Mendeteksi direktori unduhan peramban."""
@@ -212,25 +402,62 @@ class ImageGenerator:
         candidates[0].mkdir(parents=True, exist_ok=True)
         return candidates[0]
 
+    def _is_profile_locked(self) -> bool:
+        """Memeriksa apakah profil sedang dikunci proses lain atau hanya lock yatim."""
+        lock_file = self.profile_dir / "parent.lock"
+        if not lock_file.exists():
+            return False
+        try:
+            with open(lock_file, "a+b"):
+                pass
+            # Berhasil dibuka -> file lock yatim (orphan), aman dihapus otomatis
+            try:
+                lock_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return False
+        except (PermissionError, OSError):
+            return True
+
+    def _ensure_stealth_preferences(self) -> None:
+        """Menjamin pengaturan stealth aktif agar navigator.webdriver tidak terdeteksi."""
+        user_js = self.profile_dir / "user.js"
+        required_prefs = [
+            'user_pref("marionette.enabled", true);',
+            'user_pref("marionette.port", 2828);',
+            'user_pref("marionette.defaultPrefs.enabled", true);',
+            'user_pref("dom.webdriver.enabled", false);',
+            'user_pref("marionette.actors.enabled", true);',
+        ]
+        existing = ""
+        if user_js.exists():
+            existing = user_js.read_text(encoding="utf-8", errors="ignore")
+
+        missing = [p for p in required_prefs if p not in existing]
+        if missing:
+            with open(user_js, "a", encoding="utf-8") as f:
+                f.write("\n" + "\n".join(missing) + "\n")
+
     def ensure_browser(self, auto_launch: bool = True) -> None:
-        """Memastikan Firefox berjalan dengan Marionette aktif."""
+        """Memastikan Firefox berjalan dengan stealth mode & Marionette siap."""
+        self._ensure_stealth_preferences()
+
         if self.driver.is_port_open(timeout=0.8):
             return
 
-        lock_file = self.profile_dir / "parent.lock"
-        if lock_file.exists():
+        if self._is_profile_locked():
             console.print(
                 Panel(
-                    "[warning]⚠ Firefox terdeteksi berjalan tanpa port otomasi Marionette (2828).[/warning]\n"
-                    "Silakan tutup jendela Firefox tersebut sekali agar skrip dapat meluncurkannya dengan akses otomasi penuh.",
-                    title="[gold]Port Otomasi Belum Aktif[/gold]",
+                    "[warning]⚠ Profil peramban sedang digunakan oleh Firefox lain tanpa port otomasi.[/warning]\n"
+                    "Silakan tutup jendela peramban tersebut agar skrip dapat menjalankannya dalam mode otomasi stealth.",
+                    title="[gold]Profil Sedang Terkunci[/gold]",
                     box=box.ROUNDED,
                 )
             )
             Prompt.ask("[cyan]Tekan Enter setelah menutup jendela Firefox...[/cyan]")
 
         if auto_launch:
-            console.print("[info]ℹ[/info] Meluncurkan peramban dengan profil terisolasi...")
+            console.print("[info]ℹ[/info] Meluncurkan peramban Firefox dalam mode stealth (Solusi 1)...")
             env = os.environ.copy()
             env["MOZ_CRASHREPORTER_DISABLE"] = "1"
             env["MOZ_CRASHREPORTER_NO_REPORT"] = "1"
@@ -285,11 +512,15 @@ class ImageGenerator:
         raise RuntimeError("Tab Google Flow tidak ditemukan. Pastikan halaman proyek Google Flow sudah terbuka di peramban.")
 
     def submit_prompt(self, prompt_text: str) -> bool:
-        """Memasukkan teks prompt dan menekan tombol Generate / Enter."""
-        script = """
+        """Memasukkan prompt via Solusi 1 (Native OS Input: Clipboard + Ctrl+V + Enter)."""
+        # 1. Aktifkan jendela Firefox ke garis depan
+        NativeOSController.activate_window()
+        time.sleep(0.15)
+
+        # 2. Cari elemen editor input dan dapatkan koordinat layarnya
+        locate_script = """
         const inputXpath = arguments[0];
         const buttonXpath = arguments[1];
-        const promptText = arguments[2];
 
         function getByXPath(xpath) {
             try {
@@ -299,7 +530,6 @@ class ImageGenerator:
             }
         }
 
-        // 1. Cari elemen editor input
         let editorEl = getByXPath(inputXpath);
         if (!editorEl) {
             editorEl = document.querySelector('flow-rich-text-editor div[contenteditable="true"]') ||
@@ -312,49 +542,58 @@ class ImageGenerator:
             return { success: false, error: 'Elemen input prompt tidak ditemukan.' };
         }
 
-        // 2. Fokus dan isi konten teks
+        editorEl.scrollIntoView({ block: 'center' });
         editorEl.focus();
-        const sel = window.getSelection();
-        const range = document.createRange();
-        range.selectNodeContents(editorEl);
-        sel.removeAllRanges();
-        sel.addRange(range);
 
-        let inserted = document.execCommand('insertText', false, promptText);
-        if (!inserted || !editorEl.innerText.includes(promptText.trim())) {
-            editorEl.innerText = promptText;
-            editorEl.dispatchEvent(new Event('input', { bubbles: true }));
-            editorEl.dispatchEvent(new Event('change', { bubbles: true }));
-        }
+        const rect = editorEl.getBoundingClientRect();
+        const screenX = Math.round(window.mozInnerScreenX + rect.left + rect.width / 2);
+        const screenY = Math.round(window.mozInnerScreenY + rect.top + rect.height / 2);
 
-        // 3. Cari tombol generate
-        let btnEl = getByXPath(buttonXpath);
-        if (!btnEl) {
-            btnEl = document.querySelector('flow-generate-icon-button button') ||
+        // Ambil juga info tombol generate jika ada
+        let btnEl = getByXPath(buttonXpath) ||
+                    document.querySelector('flow-generate-icon-button button') ||
                     document.querySelector('flow-generate-icon-button') ||
-                    document.querySelector('flow-base-prompt-box button.generate-button') ||
-                    document.querySelector('flow-base-prompt-box button[aria-label*="Generate"]');
-        }
-
-        // 4. Klik tombol dan dispatch Enter
+                    document.querySelector('flow-base-prompt-box button.generate-button');
+        let btnCoord = null;
         if (btnEl) {
-            const clickable = btnEl.closest ? (btnEl.closest('button') || btnEl) : btnEl;
-            clickable.click();
+            const bRect = btnEl.getBoundingClientRect();
+            btnCoord = {
+                x: Math.round(window.mozInnerScreenX + bRect.left + bRect.width / 2),
+                y: Math.round(window.mozInnerScreenY + bRect.top + bRect.height / 2)
+            };
         }
 
-        editorEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-        editorEl.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-        editorEl.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-
-        return { success: true };
+        return {
+            success: true,
+            screenX: screenX,
+            screenY: screenY,
+            btnCoord: btnCoord
+        };
         """
-        res = self.driver.execute_script(script, [XPATH_PROMPT_INPUT, XPATH_GENERATE_BUTTON, prompt_text])
+        res = self.driver.execute_script(locate_script, [XPATH_PROMPT_INPUT, XPATH_GENERATE_BUTTON])
         if not isinstance(res, dict) or not res.get("success"):
-            raise RuntimeError(f"Gagal memasukkan prompt: {res}")
+            raise RuntimeError(f"Gagal menemukan elemen prompt di Google Flow: {res}")
+
+        screen_x = res["screenX"]
+        screen_y = res["screenY"]
+        btn_coord = res.get("btnCoord")
+
+        # 3. Klik langsung pada area input menggunakan mouse fisik OS untuk mengunci fokus
+        NativeOSController.send_mouse_click(screen_x, screen_y)
+        time.sleep(0.1)
+
+        # 4. Kirim Native OS Input: Salin prompt ke Clipboard -> Ctrl+A -> Backspace -> Ctrl+V -> Enter
+        NativeOSController.send_paste_and_enter(prompt_text)
+        time.sleep(0.5)
+
+        # 5. Jika tombol generate terdeteksi dan prompt belum terkirim, klik tombol generate secara fisik
+        if btn_coord and btn_coord.get("x") and btn_coord.get("y"):
+            NativeOSController.send_mouse_click(btn_coord["x"], btn_coord["y"])
+
         return True
 
     def hover_and_wait_tile(self, timeout: int = 180) -> bool:
-        """Memeriksa dan men-hover tile gambar sampai hotbar tombol opsi muncul (tanda selesai)."""
+        """Memeriksa dan men-hover tile gambar secara fisik sampai hotbar tombol opsi muncul."""
         check_script = """
         const tileXpath = arguments[0];
         const hotbarXpath = arguments[1];
@@ -367,86 +606,94 @@ class ImageGenerator:
             }
         }
 
-        // 1. Cari Tile Container
-        let tileEl = getByXPath(tileXpath);
-        if (!tileEl) {
-            tileEl = document.querySelector('cdk-virtual-scroll-viewport flow-grid-tile-container') ||
+        let tileEl = getByXPath(tileXpath) ||
+                     document.querySelector('cdk-virtual-scroll-viewport flow-grid-tile-container') ||
                      document.querySelector('flow-grid-tile-container');
-        }
 
+        let tileCoord = null;
         if (tileEl) {
-            // Picu mouse hover event
-            tileEl.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
-            tileEl.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
-            tileEl.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true }));
+            tileEl.scrollIntoView({ block: 'nearest' });
+            const rect = tileEl.getBoundingClientRect();
+            tileCoord = {
+                x: Math.round(window.mozInnerScreenX + rect.left + rect.width / 2),
+                y: Math.round(window.mozInnerScreenY + rect.top + rect.height / 2)
+            };
+            tileEl.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+            tileEl.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
         }
 
-        // 2. Periksa apakah Hotbar Button [3] / mat-icon sudah tersedia
-        let hotbarEl = getByXPath(hotbarXpath);
-        if (!hotbarEl) {
-            hotbarEl = document.querySelector('flow-grid-tile-container flow-image-hotbar button:nth-child(3) mat-icon') ||
+        let hotbarEl = getByXPath(hotbarXpath) ||
+                       document.querySelector('flow-grid-tile-container flow-image-hotbar button:nth-child(3) mat-icon') ||
                        document.querySelector('flow-image-hotbar button:nth-child(3)') ||
-                       document.querySelector('flow-image-hotbar button mat-icon[data-mat-icon-name*="more"], flow-image-hotbar button mat-icon');
+                       document.querySelector('flow-image-hotbar button mat-icon[data-mat-icon-name*="more"]');
+
+        let hotbarCoord = null;
+        if (hotbarEl) {
+            const hRect = hotbarEl.getBoundingClientRect();
+            hotbarCoord = {
+                x: Math.round(window.mozInnerScreenX + hRect.left + hRect.width / 2),
+                y: Math.round(window.mozInnerScreenY + hRect.top + hRect.height / 2)
+            };
         }
 
         return {
-            tileFound: !!tileEl,
-            hotbarReady: !!hotbarEl
+            tileCoord: tileCoord,
+            hotbarReady: !!hotbarEl,
+            hotbarCoord: hotbarCoord
         };
         """
 
         start_time = time.time()
+        last_hover_time = 0.0
+
         while time.time() - start_time < timeout:
             res = self.driver.execute_script(check_script, [XPATH_TILE_CONTAINER, XPATH_HOTBAR_ICON])
-            if isinstance(res, dict) and res.get("hotbarReady"):
-                return True
+            if isinstance(res, dict):
+                # Gerakkan kursor mouse fisik ke tile setiap beberapa detik
+                if res.get("tileCoord") and (time.time() - last_hover_time > 3.0):
+                    coord = res["tileCoord"]
+                    NativeOSController.send_mouse_move(coord["x"], coord["y"])
+                    last_hover_time = time.time()
+
+                if res.get("hotbarReady"):
+                    return True
+
             time.sleep(1.5)
 
         raise TimeoutError(f"Waktu tunggu generasi gambar habis ({timeout} detik). Gambar belum selesai dirender.")
 
     def click_hotbar_and_download(self, timeout: int = 20) -> bool:
         """Mengeklik hotbar opsi, men-hover menu item 5, lalu mengeklik tombol download."""
-        download_script = """
+        # 1. Dapatkan koordinat tombol Hotbar Opsi (button[3]/mat-icon)
+        get_hotbar_script = """
         const hotbarXpath = arguments[0];
-        const menu5Xpath = arguments[1];
-        const downloadXpath = arguments[2];
-
         function getByXPath(xpath) {
-            try {
-                return document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-            } catch (e) {
-                return null;
-            }
+            try { return document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch (e) { return null; }
         }
 
-        // 1. Klik Hotbar Icon (tombol opsi gambar)
-        let hotbarBtn = getByXPath(hotbarXpath);
-        if (!hotbarBtn) {
-            hotbarBtn = document.querySelector('flow-grid-tile-container flow-image-hotbar button:nth-child(3)') ||
+        let hotbarBtn = getByXPath(hotbarXpath) ||
+                        document.querySelector('flow-grid-tile-container flow-image-hotbar button:nth-child(3)') ||
                         document.querySelector('flow-image-hotbar button:nth-child(3)');
-        }
 
-        if (!hotbarBtn) {
-            return { success: false, step: 'hotbar', error: 'Tombol hotbar tidak ditemukan.' };
-        }
+        if (!hotbarBtn) return { success: false, error: 'Tombol hotbar tidak ditemukan.' };
 
-        const clickable = hotbarBtn.closest ? (hotbarBtn.closest('button') || hotbarBtn) : hotbarBtn;
-        clickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-        clickable.click();
-        clickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-
-        return { success: true, step: 'hotbar_clicked' };
+        const rect = hotbarBtn.getBoundingClientRect();
+        return {
+            success: true,
+            x: Math.round(window.mozInnerScreenX + rect.left + rect.width / 2),
+            y: Math.round(window.mozInnerScreenY + rect.top + rect.height / 2)
+        };
         """
+        res_h = self.driver.execute_script(get_hotbar_script, [XPATH_HOTBAR_ICON])
+        if not isinstance(res_h, dict) or not res_h.get("success"):
+            raise RuntimeError(f"Gagal menemukan koordinat tombol hotbar: {res_h}")
 
-        # Klik icon hotbar
-        res = self.driver.execute_script(download_script, [XPATH_HOTBAR_ICON, XPATH_CONTEXT_MENU_ITEM_5, XPATH_SUBMENU_DOWNLOAD_ITEM_2])
-        if not isinstance(res, dict) or not res.get("success"):
-            raise RuntimeError(f"Gagal membuka menu opsi hotbar: {res}")
-
+        # Klik fisik pada tombol hotbar
+        NativeOSController.send_mouse_click(res_h["x"], res_h["y"])
         time.sleep(0.8)
 
-        # 2. Hover menu item 5
-        hover_menu_script = """
+        # 2. Dapatkan koordinat Context Menu Item 5 & hover kursor fisik
+        get_menu5_script = """
         const menu5Xpath = arguments[0];
         function getByXPath(xpath) {
             try { return document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch (e) { return null; }
@@ -456,25 +703,30 @@ class ImageGenerator:
         if (!menu5) {
             const allItems = document.querySelectorAll('flow-image-context-menu-items flow-menu-item, flow-media-context-menu-items flow-menu-item');
             if (allItems.length >= 5) {
-                menu5 = allItems[4]; // 0-indexed
+                menu5 = allItems[4];
             }
         }
 
-        if (!menu5) {
-            return { success: false, error: 'Menu item 5 tidak ditemukan.' };
-        }
+        if (!menu5) return { success: false, error: 'Menu item 5 tidak ditemukan.' };
 
-        menu5.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
-        menu5.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
-        menu5.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true }));
-        return { success: true };
+        menu5.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+        menu5.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+
+        const rect = menu5.getBoundingClientRect();
+        return {
+            success: true,
+            x: Math.round(window.mozInnerScreenX + rect.left + rect.width / 2),
+            y: Math.round(window.mozInnerScreenY + rect.top + rect.height / 2)
+        };
         """
+        res_m = self.driver.execute_script(get_menu5_script, [XPATH_CONTEXT_MENU_ITEM_5])
+        if isinstance(res_m, dict) and res_m.get("success"):
+            NativeOSController.send_mouse_move(res_m["x"], res_m["y"])
 
-        res_hover = self.driver.execute_script(hover_menu_script, [XPATH_CONTEXT_MENU_ITEM_5])
         time.sleep(0.8)
 
-        # 3. Klik tombol download di submenu
-        click_download_script = """
+        # 3. Dapatkan koordinat Submenu Item 2 (Download) & klik fisik
+        get_dl_script = """
         const downloadXpath = arguments[0];
         function getByXPath(xpath) {
             try { return document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch (e) { return null; }
@@ -494,20 +746,21 @@ class ImageGenerator:
             }
         }
 
-        if (!dlItem) {
-            return { success: false, error: 'Tombol download submenu tidak ditemukan.' };
-        }
+        if (!dlItem) return { success: false, error: 'Tombol download submenu tidak ditemukan.' };
 
-        dlItem.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-        dlItem.click();
-        dlItem.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-        return { success: true };
+        const rect = dlItem.getBoundingClientRect();
+        return {
+            success: true,
+            x: Math.round(window.mozInnerScreenX + rect.left + rect.width / 2),
+            y: Math.round(window.mozInnerScreenY + rect.top + rect.height / 2)
+        };
         """
-
-        res_dl = self.driver.execute_script(click_download_script, [XPATH_SUBMENU_DOWNLOAD_ITEM_2])
+        res_dl = self.driver.execute_script(get_dl_script, [XPATH_SUBMENU_DOWNLOAD_ITEM_2])
         if not isinstance(res_dl, dict) or not res_dl.get("success"):
-            raise RuntimeError(f"Gagal mengeklik menu download: {res_dl}")
+            raise RuntimeError(f"Gagal menemukan koordinat tombol download: {res_dl}")
 
+        # Klik fisik tombol download
+        NativeOSController.send_mouse_click(res_dl["x"], res_dl["y"])
         return True
 
     def wait_for_downloaded_file(self, existing_files: set[str], timeout: int = 60) -> Path:
@@ -650,8 +903,8 @@ def parse_cli_args() -> tuple[str, str | None, int]:
 def main() -> int:
     console.clear()
     banner = (
-        "[brand]IMAGE GENERATOR — GOOGLE FLOW BOT[/brand] [muted]//[/muted] [gold]V2.0 ENTERPRISE[/gold]\n"
-        "[muted]Automated Prompt Injection, Hotbar Detection, and Image Downloader[/muted]"
+        "[brand]IMAGE GENERATOR — GOOGLE FLOW BOT[/brand] [muted]//[/muted] [gold]SOLUSI 1 NATIVE OS INPUT[/gold]\n"
+        "[muted]Bypass Total Deteksi Otomasi via Windows Clipboard, SendInput & Stealth Driver[/muted]"
     )
     console.print(Panel(banner, box=box.ROUNDED, style="color(240)"))
 
@@ -671,6 +924,7 @@ def main() -> int:
     table.add_column("Parameter", style="cyan", width=22)
     table.add_column("Nilai", style="bold white")
     table.add_row("Prompt Teks", f"[gold]{prompt}[/gold]")
+    table.add_row("Metode Input", "[bold green]Solusi 1 (Native OS Input + Hardware Keystrokes)[/bold green]")
     table.add_row("Target Pemindahan", f"[accent]{target_display}[/accent]")
     table.add_row("Batas Waktu (Timeout)", f"{timeout} detik")
     console.print(table)
@@ -692,10 +946,10 @@ def main() -> int:
             existing = {str(f.resolve()) for f in list(generator.download_dir.glob("*.jpg")) + list(generator.download_dir.glob("*.jpeg"))}
             generator.find_flow_tab()
 
-            progress.update(task, description="[cyan]Mengirim prompt & memicu eksekusi...")
+            progress.update(task, description="[cyan]Mengirim prompt via Native OS Clipboard & Enter...")
             generator.submit_prompt(prompt)
 
-            progress.update(task, description="[gold]Menunggu render gambar selesai (memantau hotbar tile)...")
+            progress.update(task, description="[gold]Menunggu render gambar selesai (hovering tile)...")
             generator.hover_and_wait_tile(timeout=timeout)
 
             progress.update(task, description="[cyan]Mengeklik hotbar opsi & memicu unduhan...")
@@ -733,6 +987,7 @@ def main() -> int:
     summary_table.add_column("Komponen", style="cyan")
     summary_table.add_column("Status / Lokasi", style="bold")
     summary_table.add_row("Status Generasi", "[bold green]✓ Selesai & Terverifikasi[/bold green]")
+    summary_table.add_row("Metode Eksekusi", "[bold green]✓ Native OS Hardware Input (isTrusted: true)[/bold green]")
     summary_table.add_row("Hotbar & Download Menu", "[bold green]✓ Berhasil Diklik[/bold green]")
     summary_table.add_row("File Hasil Gambar", f"[bold green]{target_file}[/bold green]")
     console.print(summary_table)

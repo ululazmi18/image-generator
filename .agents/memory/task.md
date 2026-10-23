@@ -28,3 +28,11 @@
   - [x] Pemindahan berkas fleksibel ke path pemanggil atau default `outputs/`
   - [x] Sediakan fungsi callable `generate_image(prompt, output_path=None)` untuk diimpor skrip lain
   - [x] Penamaan modul `image_generator.py` dan entri `Image Generator.py` serta runner `.bat`
+
+- [x] Solusi 1: Native OS Input & Stealth Anti-Deteksi
+  - [x] Injeksi stealth pref `dom.webdriver.enabled = false` ke `browser_profile/user.js` (menghapus deteksi `navigator.webdriver`)
+  - [x] Implementasi `NativeOSController` (Windows Clipboard `win32clipboard`, `SetProcessDpiAwareness`, `SetThreadDesktop`)
+  - [x] Aktivasi dan pemfokusan jendela Firefox ke garis depan (bypassing Windows foreground lock)
+  - [x] Pengiriman input prompt via Clipboard OS dan tombol hardware (`Ctrl+V` + `Enter` fisik via `win32api.keybd_event`) agar `event.isTrusted === true`
+  - [x] Pengiriman event pergerakan kursor mouse dan klik fisik (`win32api.mouse_event`) berbasis koordinat layar `window.mozInnerScreenX`
+  - [x] Self-healing pembersihan otomatis file lock yatim `parent.lock` saat Firefox tidak berjalan

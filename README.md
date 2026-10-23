@@ -76,11 +76,12 @@ python "Image Generator.py" --prompt gambar produk hidup
 
 ---
 
-## 4. Alur Kerja Otomasi (End-to-End Flow)
-1. **Injeksi Prompt:** Menemukan tab Google Flow (`aisandbox-root`) dan memasukkan prompt ke area *rich text editor*.
-2. **Submit & Trigger:** Menekan tombol *Generate* dan mengirimkan event keyboard `Enter`.
-3. **Hover & Deteksi Selesai:** Men-hover tile gambar (`flow-grid-tile-container[1]`) dan memantau ketersediaan hotbar tombol 3 (`flow-image-hotbar button[3]/mat-icon`) sebagai indikator render selesai.
-4. **Buka Menu Opsi:** Mengeklik tombol 3 pada hotbar untuk membuka context menu overlay.
-5. **Akses Submenu Download:** Men-hover menu item ke-5, lalu mengeklik menu item ke-2 untuk memicu unduhan.
-6. **Pemantauan Unduhan:** Memantau kemunculan berkas `.jpg` baru di direktori unduhan hingga selesai (tidak ada berkas `.part`).
-7. **Pemindahan Fleksibel:** Memindahkan berkas ke direktori yang diinginkan (default ke folder `outputs/` atau sesuai parameter pemanggil).
+## 4. Alur Kerja Otomasi & Teknologi Anti-Deteksi (Solusi 1: Native OS Input)
+1. **Stealth Driver Mode:** Browser dijalankan dengan `dom.webdriver.enabled = false` di `user.js`, sehingga `navigator.webdriver` bernilai `undefined` (sama seperti peramban manusia biasa tanpa tanda robot).
+2. **Aktivasi & Fokus Jendela:** Mengaktifkan jendela Firefox ke garis depan dan membypass pembatasan Windows foreground lock.
+3. **Injeksi Prompt Native OS:** Teks prompt disalin ke Windows Clipboard (`win32clipboard`), kursor diposisikan di editor prompt, lalu dikirimkan hardware keystrokes asli (`Ctrl+V` dan `Enter` fisik via Windows API `keybd_event`) sehingga `event.isTrusted === true`.
+4. **Hover & Deteksi Selesai:** Kursor mouse fisik digerakkan ke atas tile gambar (`flow-grid-tile-container[1]`) dan memantau ketersediaan hotbar tombol 3 (`flow-image-hotbar button[3]/mat-icon`) sebagai indikator render selesai.
+5. **Buka Menu Opsi:** Mengeklik tombol 3 pada hotbar secara fisik untuk membuka context menu overlay.
+6. **Akses Submenu Download:** Mengarahkan mouse ke menu item ke-5, lalu mengeklik submenu item ke-2 secara fisik untuk memicu unduhan.
+7. **Pemantauan Unduhan:** Memantau kemunculan berkas `.jpg` baru di direktori unduhan (`D:\Downloads`) hingga selesai (tidak ada berkas sementara `.part`).
+8. **Pemindahan Fleksibel:** Memindahkan berkas ke direktori yang diinginkan (default ke folder `outputs/` atau sesuai parameter pemanggil).
