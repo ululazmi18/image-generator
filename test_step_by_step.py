@@ -28,6 +28,7 @@ except Exception:
 
 from PIL import ImageGrab
 import win32api
+import win32con
 import win32gui
 
 from rich import box
@@ -66,37 +67,37 @@ class StepByStepTester:
         self.generator = ImageGenerator(workspace_dir=self.workspace_dir)
 
     def capture_screenshot(self, step_num: int, step_name: str, description: str) -> Path:
-        """Mengambil tangkapan layar jendela Firefox dan halaman web."""
-        NativeOSController.ensure_interactive_desktop()
+        """Mengambil tangkapan layar murni halaman web peramban (browser viewport) tanpa frame Windows."""
         file_slug = re.sub(r"[^\w\s-]", "", step_name).strip().replace(" ", "_").lower()
         file_path = self.run_dir / f"step_{step_num:02d}_{file_slug}.png"
 
-        hwnd = NativeOSController.find_firefox_hwnd()
         captured = False
-
-        if hwnd and win32gui.IsWindow(hwnd):
-            try:
-                rect = win32gui.GetWindowRect(hwnd)
-                # Bounding box: left, top, right, bottom
-                if rect[2] > rect[0] and rect[3] > rect[1]:
-                    im = ImageGrab.grab(bbox=rect)
-                    im.save(file_path, "PNG")
+        # 1. Ambil screenshot murni dari dalam viewport halaman browser via driver soket
+        try:
+            if self.generator.driver and self.generator.driver.sock:
+                png_bytes = self.generator.driver.take_screenshot(full=False)
+                if png_bytes and len(png_bytes) > 100:
+                    file_path.write_bytes(png_bytes)
                     captured = True
-            except Exception:
-                captured = False
+        except Exception:
+            captured = False
 
+        # 2. Fallback jika driver soket belum aktif
         if not captured:
-            # Fallback ke fullscreen desktop grab
-            try:
-                im = ImageGrab.grab()
-                im.save(file_path, "PNG")
-                captured = True
-            except Exception:
-                pass
+            NativeOSController.ensure_interactive_desktop()
+            hwnd = NativeOSController.find_firefox_hwnd()
+            if hwnd and win32gui.IsWindow(hwnd):
+                try:
+                    rect = win32gui.GetWindowRect(hwnd)
+                    if rect[2] > rect[0] and rect[3] > rect[1]:
+                        im = ImageGrab.grab(bbox=rect)
+                        im.save(file_path, "PNG")
+                        captured = True
+                except Exception:
+                    pass
 
-        # Tambahkan ke rekaman ringkasan
         self.screenshots.append((step_num, step_name, file_path, description))
-        console.print(f"  [accent]📸 Tangkapan Layar Disimpan:[/accent] [cyan]{file_path.name}[/cyan]")
+        console.print(f"  [accent]📸 Tangkapan Layar Halaman Web Disimpan:[/accent] [cyan]{file_path.name}[/cyan]")
         return file_path
 
     def step_pause(self, message: str) -> None:

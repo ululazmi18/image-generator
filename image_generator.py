@@ -359,6 +359,13 @@ class MarionetteDriver:
         """Beralih ke tab/jendela tertentu."""
         self.send("WebDriver:SwitchToWindow", {"handle": handle})
 
+    def take_screenshot(self, full: bool = False) -> bytes:
+        """Mengambil tangkapan layar halaman web peramban (PNG) langsung dari viewport browser."""
+        import base64
+        res = self.send("WebDriver:TakeScreenshot", {"full": full})
+        val = res.get("value") if isinstance(res, dict) else res
+        return base64.b64decode(val)
+
     def close(self) -> None:
         """Menutup koneksi soket."""
         if self.sock:
