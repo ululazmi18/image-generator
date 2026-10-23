@@ -76,12 +76,31 @@ python "Image Generator.py" --prompt gambar produk hidup
 
 ---
 
-## 4. Alur Kerja Otomasi & Teknologi Anti-Deteksi (Solusi 1: Native OS Input)
-1. **Stealth Driver Mode:** Browser dijalankan dengan `dom.webdriver.enabled = false` di `user.js`, sehingga `navigator.webdriver` bernilai `undefined` (sama seperti peramban manusia biasa tanpa tanda robot).
-2. **Aktivasi & Fokus Jendela:** Mengaktifkan jendela Firefox ke garis depan dan membypass pembatasan Windows foreground lock.
-3. **Injeksi Prompt Native OS:** Teks prompt disalin ke Windows Clipboard (`win32clipboard`), kursor diposisikan di editor prompt, lalu dikirimkan hardware keystrokes asli (`Ctrl+V` dan `Enter` fisik via Windows API `keybd_event`) sehingga `event.isTrusted === true`.
-4. **Hover & Deteksi Selesai:** Kursor mouse fisik digerakkan ke atas tile gambar (`flow-grid-tile-container[1]`) dan memantau ketersediaan hotbar tombol 3 (`flow-image-hotbar button[3]/mat-icon`) sebagai indikator render selesai.
-5. **Buka Menu Opsi:** Mengeklik tombol 3 pada hotbar secara fisik untuk membuka context menu overlay.
-6. **Akses Submenu Download:** Mengarahkan mouse ke menu item ke-5, lalu mengeklik submenu item ke-2 secara fisik untuk memicu unduhan.
-7. **Pemantauan Unduhan:** Memantau kemunculan berkas `.jpg` baru di direktori unduhan (`D:\Downloads`) hingga selesai (tidak ada berkas sementara `.part`).
-8. **Pemindahan Fleksibel:** Memindahkan berkas ke direktori yang diinginkan (default ke folder `outputs/` atau sesuai parameter pemanggil).
+## 4. Dua Versi Modul Otomasi
+
+### A. Versi 2 (Default): `image_generator.py` (Silent Background Edition)
+- **Zero Cursor Hijacking:** 100% bebas dari pergerakan mouse kursor fisik Windows, keyboard hardware, atau clipboard OS. Pengguna bebas mengetik, bekerja, atau bermain game tanpa interupsi sedikit pun.
+- **Berjalan di Latar Belakang (Minimized / Headless):** Jendela browser dibuka secara terminimalkan (`SW_SHOWMINNOACTIVE`) tanpa mencuri fokus jendela, atau mode `--headless` murni tanpa GUI.
+- **Stealth DOM & Gecko Bridge:** Injeksi prompt via ProseMirror DOM event, klik tombol generate via Gecko C++ native click, navigasi menu opsi & resolusi 1K via Angular CDK overlay events.
+- **Pembersihan Otomatis:** Setelah berkas 1K diunduh dan dipindahkan ke direktori tujuan, gambar di kanvas Google Flow otomatis dipindahkan ke sampah (*trash*).
+
+### B. Versi 1 (Legacy / Arsip): `image_generator_v1.py` (Native OS Input Edition)
+- Menggunakan pergerakan kursor mouse fisik Windows (`win32api.SetCursorPos`, `mouse_event`), clipboard OS (`win32clipboard`), hardware keystrokes `Ctrl+V`, dan aktivasi jendela foreground.
+- Dipertahankan untuk kebutuhan audit, perbandingan metode, atau demonstrasi visual bertahap (`test_step_by_step.py`).
+
+---
+
+## 5. Parameter CLI & Opsi Baris Perintah
+```powershell
+# 1. Mode Senyap Standar (Minimized Background)
+python image_generator.py --prompt gambar pemandangan danau bersalju -o outputs/
+
+# 2. Mode Headless (Murni Tanpa Antarmuka GUI)
+python image_generator.py --headless --prompt robot kucing futuristik di kota tokyo
+
+# 3. Kustomisasi Batas Waktu & Direktori
+python image_generator.py --timeout 240 --dest D:\Assets\AI\ --prompt kastil fantasi megah
+
+# 4. Menjalankan Versi 1 (Native OS Cursor)
+python image_generator_v1.py --prompt pemandangan pantai tropis
+```

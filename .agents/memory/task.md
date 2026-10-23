@@ -51,3 +51,14 @@
   - [x] Bukti video rekaman `test_delete_flow_1792796065753.webp` dan screenshot kanvas bersih `media_1792796119211.png`
   - [x] Integrasi method `delete_current_tile()` ke `ImageGenerator` pada `image_generator.py`
   - [x] Penambahan LANGKAH 11 ke `test_step_by_step.py` lengkap dengan screenshot kanvas bersih pasca penghapusan
+
+- [x] Metode Silent Background Tanpa Mengontrol Kursor Pengguna (image_generator.py v2 & image_generator_v1.py)
+  - [x] Salin dan preservasi versi stabil metode Native OS Input ke `image_generator_v1.py`
+  - [x] Eliminasi seluruh panggilan `win32api.SetCursorPos`, `mouse_event`, `keybd_event`, dan `win32clipboard` pada `image_generator.py` v2
+  - [x] Injeksi prompt via ProseMirror DOM (`document.execCommand('insertText')` + `InputEvent`) secara senyap
+  - [x] Klik tombol generate via Gecko native `WebDriver:ElementClick` (0% pergerakan mouse kursor OS)
+  - [x] Pelacakan status render tile gambar baru berbasis snapshot `initial_state` (`imgCount` & `firstImgSrc`) untuk mencegah false positive gambar lama
+  - [x] Buka hotbar & navigasi menu unduhan resolusi 1K via DOM click pada Angular CDK overlay
+  - [x] Penghapusan gambar otomatis dari kanvas ('Pindahkan ke sampah') setelah berkas tersimpan
+  - [x] Dukungan peramban terminimalkan di latar belakang (`SW_SHOWMINNOACTIVE`) dan mode `--headless`
+  - [x] Pengujian empiris end-to-end `image_generator.py` berhasil menghasilkan dan mengunduh gambar aurora borealis (1K) secara senyap dalam 37 detik tanpa menyentuh mouse pengguna

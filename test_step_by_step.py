@@ -38,7 +38,7 @@ from rich.prompt import Prompt
 from rich.table import Table
 from rich.theme import Theme
 
-from image_generator import (
+from image_generator_v1 import (
     CUSTOM_THEME,
     ImageGenerator,
     NativeOSController,
