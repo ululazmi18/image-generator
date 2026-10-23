@@ -12,37 +12,42 @@ Workspace `Image Generator` dirancang untuk otomasi generasi gambar berbasis per
 ### 3. Core Features (MVP)
 1. **Isolated Browser Profile Folder (`browser_profile`):**
    - Kloning dari `D:\FirefoxPortable\Data\profiles\ulul_azmi`.
-   - Mengecualikan berkas kunci sementara (`parent.lock`) dan cache web berat (`cache2`) untuk menjaga portabilitas dan kecepatan I/O.
+   - Konfigurasi permanen `user.js` untuk port Marionette `127.0.0.1:2828`.
+   - Mengecualikan berkas kunci sementara (`parent.lock`) dan cache web berat (`cache2`).
 2. **Direct In-Folder Starter (`browser_profile\starter.bat` & `start_browser.bat`):**
    - Meluncurkan `D:\FirefoxPortable\App\Firefox64\firefox.exe`.
-   - Menggunakan parameter otomatis `-no-remote -profile "%~dp0"`.
-   - Mendukung argumen URL tambahan (`%*`).
-3. **Workspace Root Launcher (`start_browser.bat`):**
-   - Peluncur pintasan di tingkat root workspace yang mendelegasikan eksekusi ke `browser_profile\starter.bat`.
+   - Menggunakan parameter otomatis `-no-remote -marionette -profile "%~dp0"`.
+3. **Google Flow Automation Engine (`automate_flow.py` & `flow.bat`):**
+   - Klien protokol Marionette native (zero-dependency socket client).
+   - Pemindai otomatis tab aktif Google Flow (`aisandbox-root` / `flow-project-shell`).
+   - Ekstraktor argumen `--prompt {teks}` yang menggabungkan seluruh kata tanpa memerlukan kurung tanda petik ganda.
+   - Pemasukan prompt via `document.execCommand('insertText')` dan pemicuan tombol eksekusi / Enter.
+   - Penyiapan arsitektur lanjutan untuk deteksi status generasi (Completed / InProgress / Failed).
 
 ### 4. User Flow
-1. Pengguna membuka folder `d:\Documents\Image Generator\browser_profile`.
-2. Pengguna mengeklik ganda `starter.bat` (atau `start_browser.bat`).
-3. Skrip memverifikasi ketersediaan biner Firefox Portable, membersihkan lock file usang jika ada, dan membuka Firefox dengan profil mandiri.
-4. Pengguna dapat langsung berinteraksi dengan platform image generation dalam sesi yang persisten.
+1. Pengguna membuka peramban melalui [browser_profile\starter.bat](file:///d:/Documents/Image%20Generator/browser_profile/starter.bat).
+2. Pengguna membuka tab Google Flow ([https://labs.google/flow](https://labs.google/flow)) pada proyek yang diinginkan.
+3. Pengguna mengeksekusi otomasi melalui CLI: `.\flow.bat --prompt gambar produk hidup`.
+4. Skrip mendeteksi tab Google Flow, mengisi prompt pada editor kaya (*rich text editor*), menekan tombol *Generate* / mengirim *Enter*, lalu menampilkan status ringkasan eksekusi.
 
 ### 5. Architecture Diagram
 ```mermaid
 graph TD
-    A[User / Agent] -->|Execute| B[browser_profile/starter.bat]
-    A -->|Optional Root Shortcut| C[start_browser.bat]
-    C -->|Delegate| B
-    B -->|Check Lock & Telemetry Guard| D[Verify parent.lock]
-    D -->|Launch -no-remote -profile| E[D:\FirefoxPortable\App\Firefox64\firefox.exe]
-    E -->|Loads Configuration & Storage| F[d:\Documents\Image Generator\browser_profile]
+    A[User Terminal / CLI] -->|flow.bat --prompt ...| B[automate_flow.py]
+    B -->|Check / Auto-Launch| C[Firefox Portable -marionette]
+    C -->|Port 127.0.0.1:2828| D[MarionetteDriver Socket]
+    D -->|Find Tab & Switch| E[Tab Google Flow AISandbox]
+    E -->|Inject Prompt Text| F[Rich Text Editor p]
+    E -->|Click / Dispatch Enter| G[Generate Button / Enter Key]
 ```
 
 ### 6. File & Directory Layout
 - `browser_profile/`: Direktori data profil Firefox (places, extensions, storage, prefs, logins).
-- `browser_profile/starter.bat`: Peluncur langsung di dalam folder profil.
+- `browser_profile/starter.bat`: Peluncur langsung di dalam folder profil (-marionette).
 - `browser_profile/start_browser.bat`: Alias peluncur untuk kenyamanan pengguna.
-- `browser_profile/starter.py`: Peluncur opsional berbasis Python dengan TUI Rich.
-- `start_browser.bat`: Pintasan peluncur di root workspace.
+- `browser_profile/user.js`: Konfigurasi permanen port otomasi Marionette.
+- `automate_flow.py`: Engine otomasi Google Flow.
+- `flow.bat`: Pintasan runner batch.
 - `.gitignore`: Mengabaikan `browser_profile/` dari pelacakan git.
 
 ### 7. Constraints & Guardrails
