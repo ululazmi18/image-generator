@@ -20,3 +20,6 @@ tmp/
 .env
 .env.local
 .env.*.local
+
+# Test Artifacts & Screenshots
+screenshots/
