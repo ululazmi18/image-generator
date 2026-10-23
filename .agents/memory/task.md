@@ -12,16 +12,19 @@
 
 - [x] Otomasi Google Flow (Tahap Input & Eksekusi Prompt)
   - [x] Konfigurasi port Marionette permanen (`browser_profile\user.js` & `-marionette` flag)
-  - [x] Buat driver soket Marionette native zero-dependency di `automate_flow.py`
+  - [x] Buat driver soket Marionette native zero-dependency
   - [x] Implementasi parser CLI `--prompt` tanpa wajib tanda petik (contoh: `--prompt gambar produk hidup`)
   - [x] Implementasi pemindai otomatis tab Google Flow (`aisandbox-root` / `flow-project-shell`)
   - [x] Implementasi pengisian prompt ke area editor Xpath via `document.execCommand('insertText')`
   - [x] Implementasi pemicuan tombol eksekusi Xpath dan event keyboard Enter
-  - [x] Buat batch wrapper `flow.bat` untuk eksekusi mudah di terminal
-  - [x] Uji unit parser dan sintaksis kode
-  - [x] Sinkronisasi AST/Memori via agent-memory
 
-- [ ] Lanjutan: Deteksi Status Generasi (Bersambung)
-  - [ ] Pemantauan status proses generasi (InProgress / Rendering)
-  - [ ] Verifikasi hasil output gambar selesai (Completed)
-  - [ ] Penanganan kondisi error / limit kuota (Failed)
+- [x] Alur Download & Pemindahan Berkas Otomatis
+  - [x] Hover pada tile gambar pertama (`flow-grid-tile-container[1]`)
+  - [x] Pemantauan hotbar button 3 (`flow-image-hotbar button[3]/mat-icon`) sebagai indikator render selesai
+  - [x] Klik hotbar button 3 untuk membuka context menu
+  - [x] Hover menu item ke-5 (`flow-menu-item[5]`) untuk membuka submenu download
+  - [x] Klik submenu download ke-2 (`flow-menu-item[2]`) untuk mengunduh gambar asli
+  - [x] Pemantauan direktori unduhan sampai berkas `.jpg` selesai (tidak ada berkas `.part`)
+  - [x] Pemindahan berkas fleksibel ke path pemanggil atau default `outputs/`
+  - [x] Sediakan fungsi callable `generate_image(prompt, output_path=None)` untuk diimpor skrip lain
+  - [x] Penamaan modul `image_generator.py` dan entri `Image Generator.py` serta runner `.bat`

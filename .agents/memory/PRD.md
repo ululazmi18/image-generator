@@ -17,28 +17,34 @@ Workspace `Image Generator` dirancang untuk otomasi generasi gambar berbasis per
 2. **Direct In-Folder Starter (`browser_profile\starter.bat` & `start_browser.bat`):**
    - Meluncurkan `D:\FirefoxPortable\App\Firefox64\firefox.exe`.
    - Menggunakan parameter otomatis `-no-remote -marionette -profile "%~dp0"`.
-3. **Google Flow Automation Engine (`automate_flow.py` & `flow.bat`):**
+3. **Image Generator Automation Module (`image_generator.py` & `Image Generator.py`):**
    - Klien protokol Marionette native (zero-dependency socket client).
    - Pemindai otomatis tab aktif Google Flow (`aisandbox-root` / `flow-project-shell`).
-   - Ekstraktor argumen `--prompt {teks}` yang menggabungkan seluruh kata tanpa memerlukan kurung tanda petik ganda.
-   - Pemasukan prompt via `document.execCommand('insertText')` dan pemicuan tombol eksekusi / Enter.
-   - Penyiapan arsitektur lanjutan untuk deteksi status generasi (Completed / InProgress / Failed).
+   - Ekstraktor argumen `--prompt {teks}` yang menggabungkan seluruh kata tanpa tanda petik.
+   - Pemasukan prompt via `document.execCommand('insertText')` dan pemicuan eksekusi.
+   - Hover pada tile gambar pertama (`flow-grid-tile-container[1]`) dan pemantauan hotbar button 3 sebagai sinyal selesai.
+   - Pembukaan context menu opsi hotbar, hover submenu download ke-5, dan klik download ke-2.
+   - Pemantauan unduhan berkas `.jpg` di direktori unduhan hingga selesai dan pemindahan fleksibel ke target pemanggil.
+   - Fungsi callable: `generate_image(prompt, output_path=None, timeout=180) -> Path`.
 
 ### 4. User Flow
 1. Pengguna membuka peramban melalui [browser_profile\starter.bat](file:///d:/Documents/Image%20Generator/browser_profile/starter.bat).
 2. Pengguna membuka tab Google Flow ([https://labs.google/flow](https://labs.google/flow)) pada proyek yang diinginkan.
-3. Pengguna mengeksekusi otomasi melalui CLI: `.\flow.bat --prompt gambar produk hidup`.
-4. Skrip mendeteksi tab Google Flow, mengisi prompt pada editor kaya (*rich text editor*), menekan tombol *Generate* / mengirim *Enter*, lalu menampilkan status ringkasan eksekusi.
+3. Skrip pemanggil mengeksekusi fungsi `generate_image(prompt)` atau via CLI `.\image_generator.bat --prompt ... -o ...`.
+4. Skrip mengisi prompt, menekan Generate, men-hover tile hingga hotbar muncul, memicu unduhan gambar asli via context menu, dan memindahkan berkas `.jpg` ke lokasi yang ditentukan.
 
 ### 5. Architecture Diagram
 ```mermaid
 graph TD
-    A[User Terminal / CLI] -->|flow.bat --prompt ...| B[automate_flow.py]
+    A[Caller Script / User CLI] -->|generate_image / CLI| B[image_generator.py]
     B -->|Check / Auto-Launch| C[Firefox Portable -marionette]
     C -->|Port 127.0.0.1:2828| D[MarionetteDriver Socket]
     D -->|Find Tab & Switch| E[Tab Google Flow AISandbox]
-    E -->|Inject Prompt Text| F[Rich Text Editor p]
-    E -->|Click / Dispatch Enter| G[Generate Button / Enter Key]
+    E -->|1. Inject Prompt & Enter| F[Rich Text Editor p]
+    E -->|2. Hover & Wait Hotbar| G[flow-grid-tile-container 1]
+    E -->|3. Click Hotbar & Context Menu| H[flow-menu-item 5 Hover]
+    E -->|4. Trigger Download| I[flow-menu-item 2 Click]
+    I -->|5. Monitor & Move File| J[Target Destination File .jpg]
 ```
 
 ### 6. File & Directory Layout
@@ -46,8 +52,10 @@ graph TD
 - `browser_profile/starter.bat`: Peluncur langsung di dalam folder profil (-marionette).
 - `browser_profile/start_browser.bat`: Alias peluncur untuk kenyamanan pengguna.
 - `browser_profile/user.js`: Konfigurasi permanen port otomasi Marionette.
-- `automate_flow.py`: Engine otomasi Google Flow.
-- `flow.bat`: Pintasan runner batch.
+- `image_generator.py`: Modul inti dan callable function `generate_image`.
+- `Image Generator.py`: Entrypoint alternatif bernama "Image Generator".
+- `image_generator.bat` & `Image Generator.bat`: Pintasan runner batch.
+- `flow.bat`: Alias runner batch.
 - `.gitignore`: Mengabaikan `browser_profile/` dari pelacakan git.
 
 ### 7. Constraints & Guardrails
