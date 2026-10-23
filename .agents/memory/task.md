@@ -36,3 +36,12 @@
   - [x] Pengiriman input prompt via Clipboard OS dan tombol hardware (`Ctrl+V` + `Enter` fisik via `win32api.keybd_event`) agar `event.isTrusted === true`
   - [x] Pengiriman event pergerakan kursor mouse dan klik fisik (`win32api.mouse_event`) berbasis koordinat layar `window.mozInnerScreenX`
   - [x] Self-healing pembersihan otomatis file lock yatim `parent.lock` saat Firefox tidak berjalan
+
+- [x] Pengujian Browser Natif & Integrasi Hasil Empiris ke Profil Lokal
+  - [x] Eksekusi uji coba end-to-end pada browser natif di proyek `https://flow.google.com/project/8eed2cd9-e563-46d8-9ad2-395e53901db4` (100% Berhasil)
+  - [x] Temuan krusial alur unduhan: Menu "Download" membuka submenu sekunder yang mewajibkan klik pada opsi "1K (Ukuran asli)"
+  - [x] Rekam bukti video interaksi web: `test_flow_e2e_1792775506146.webp` dan screenshot unduhan berhasil
+  - [x] Perbarui selector dan logika `click_hotbar_and_download()` pada `image_generator.py` dan `test_step_by_step.py` agar memilih opsi "1K (Ukuran asli)"
+  - [x] Implementasi tangkapan layar murni halaman web (`driver.take_screenshot()`) tanpa frame Windows desktop
+  - [x] Modifikasi `userChrome.css` untuk menghapus garis merah bergaris dan ikon robot peramban
+  - [x] Validasi sintaksis dan sinkronisasi basis data memori AST (76 entitas)

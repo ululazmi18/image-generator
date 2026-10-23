@@ -310,71 +310,91 @@ class StepByStepTester:
             self.step_pause("Menu konteks terbuka.")
 
             # ------------------------------------------------------------------
-            # LANGKAH 8: Hover Menu Item 5 (Submenu Download)
+            # LANGKAH 8: Klik / Hover Menu 'Download' (Buka Submenu Resolusi)
             # ------------------------------------------------------------------
-            console.print(Panel("[bold cyan]LANGKAH 8:[/bold cyan] Men-hover Menu Item 5 untuk Membuka Submenu", box=box.SIMPLE))
-            get_m5_script = """
+            console.print(Panel("[bold cyan]LANGKAH 8:[/bold cyan] Mengakses Menu 'Download' untuk Membuka Submenu Resolusi", box=box.SIMPLE))
+            get_dl_menu_script = """
             const menu5Xpath = arguments[0];
             function getByXPath(p) {
                 try { return document.evaluate(p, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch (e) { return null; }
             }
-            let m5 = getByXPath(menu5Xpath);
-            if (!m5) {
-                const all = document.querySelectorAll('flow-image-context-menu-items flow-menu-item, flow-media-context-menu-items flow-menu-item');
-                if (all.length >= 5) m5 = all[4];
+            let dlMenu = null;
+            const allItems = document.querySelectorAll('div.cdk-overlay-pane flow-menu-item, flow-image-context-menu-items flow-menu-item, [role="menuitem"]');
+            for (let item of allItems) {
+                const text = (item.innerText || '').trim().toLowerCase();
+                if (text.startsWith('download') || text.startsWith('unduh')) {
+                    dlMenu = item;
+                    break;
+                }
             }
-            if (!m5) return null;
-            m5.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-            m5.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-            const rect = m5.getBoundingClientRect();
+            if (!dlMenu) {
+                dlMenu = getByXPath(menu5Xpath);
+            }
+            if (!dlMenu && allItems.length >= 5) {
+                dlMenu = allItems[4];
+            }
+            if (!dlMenu) return null;
+
+            dlMenu.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+            dlMenu.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+            const rect = dlMenu.getBoundingClientRect();
             return {
                 x: Math.round(window.mozInnerScreenX + rect.left + rect.width / 2),
                 y: Math.round(window.mozInnerScreenY + rect.top + rect.height / 2)
             };
             """
-            m5_coord = self.generator.driver.execute_script(get_m5_script, [XPATH_CONTEXT_MENU_ITEM_5])
-            if m5_coord:
-                NativeOSController.send_mouse_move(m5_coord["x"], m5_coord["y"])
+            m_coord = self.generator.driver.execute_script(get_dl_menu_script, [XPATH_CONTEXT_MENU_ITEM_5])
+            if not m_coord:
+                raise RuntimeError("Menu 'Download' tidak ditemukan pada menu konteks gambar.")
 
+            NativeOSController.send_mouse_move(m_coord["x"], m_coord["y"])
+            time.sleep(0.1)
+            NativeOSController.send_mouse_click(m_coord["x"], m_coord["y"])
             time.sleep(0.8)
-            self.capture_screenshot(8, "submenu_unduhan_muncul", "Kursor mouse mengarah ke item ke-5 dan submenu unduhan terbuka.")
-            console.print("[success]✓ Langkah 8 Selesai: Submenu siap.[/success]\n")
-            self.step_pause("Submenu unduhan siap.")
+
+            self.capture_screenshot(8, "submenu_resolusi_unduhan_muncul", "Menu 'Download' diklik dan submenu resolusi (1K Ukuran asli) muncul.")
+            console.print("[success]✓ Langkah 8 Selesai: Submenu resolusi unduhan siap.[/success]\n")
+            self.step_pause("Submenu resolusi unduhan siap.")
 
             # ------------------------------------------------------------------
-            # LANGKAH 9: Klik Tombol Download (Submenu Item 2)
+            # LANGKAH 9: Klik Resolusi '1K (Ukuran asli)' (Memicu Download)
             # ------------------------------------------------------------------
-            console.print(Panel("[bold cyan]LANGKAH 9:[/bold cyan] Mengeklik Tombol Download di Submenu", box=box.SIMPLE))
-            get_dl_script = """
-            const dlXpath = arguments[0];
+            console.print(Panel("[bold cyan]LANGKAH 9:[/bold cyan] Mengeklik Opsi Resolusi '1K (Ukuran asli)' di Submenu", box=box.SIMPLE))
+            get_1k_script = """
             function getByXPath(p) {
                 try { return document.evaluate(p, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch (e) { return null; }
             }
-            let dl = getByXPath(dlXpath);
-            if (!dl) {
-                const overlays = document.querySelectorAll('div.cdk-overlay-pane flow-menu-item, flow-menu-item');
-                for (let el of overlays) {
-                    if ((el.innerText || '').toLowerCase().includes('download') || (el.innerText || '').toLowerCase().includes('unduh')) {
-                        dl = el; break;
-                    }
+            let oneKItem = null;
+            const subItems = document.querySelectorAll('div.cdk-overlay-pane flow-menu-item, div.cdk-overlay-pane [role="menuitem"], div.cdk-overlay-pane button, flow-menu-item');
+            for (let sub of subItems) {
+                const text = (sub.innerText || '').trim();
+                if (text.includes('1K') || text.toLowerCase().includes('ukuran asli') || text.toLowerCase().includes('original size')) {
+                    oneKItem = sub;
+                    break;
                 }
-                if (!dl && overlays.length >= 2) dl = overlays[1];
             }
-            if (!dl) return null;
-            const rect = dl.getBoundingClientRect();
+            if (!oneKItem) {
+                const panes = document.querySelectorAll('div.cdk-overlay-pane');
+                if (panes.length > 0) {
+                    const lastPane = panes[panes.length - 1];
+                    oneKItem = lastPane.querySelector('flow-menu-item, [role="menuitem"], button');
+                }
+            }
+            if (!oneKItem) return null;
+            const rect = oneKItem.getBoundingClientRect();
             return {
                 x: Math.round(window.mozInnerScreenX + rect.left + rect.width / 2),
                 y: Math.round(window.mozInnerScreenY + rect.top + rect.height / 2)
             };
             """
-            dl_coord = self.generator.driver.execute_script(get_dl_script, [XPATH_SUBMENU_DOWNLOAD_ITEM_2])
-            if not dl_coord:
-                raise RuntimeError("Koordinat tombol download submenu tidak ditemukan.")
+            one_k_coord = self.generator.driver.execute_script(get_1k_script)
+            if not one_k_coord:
+                raise RuntimeError("Koordinat tombol resolusi '1K (Ukuran asli)' tidak ditemukan di submenu.")
 
-            NativeOSController.send_mouse_click(dl_coord["x"], dl_coord["y"])
+            NativeOSController.send_mouse_click(one_k_coord["x"], one_k_coord["y"])
             time.sleep(1.0)
-            self.capture_screenshot(9, "tombol_download_diklik", "Tombol download diklik dan proses unduhan dimulai.")
-            console.print("[success]✓ Langkah 9 Selesai: Tombol download diklik.[/success]\n")
+            self.capture_screenshot(9, "resolusi_1k_diklik_download_mulai", "Opsi '1K (Ukuran asli)' diklik dan browser memulai unduhan gambar asli.")
+            console.print("[success]✓ Langkah 9 Selesai: Unduhan gambar 1K terpicu.[/success]\n")
 
             # ------------------------------------------------------------------
             # LANGKAH 10: Pemantauan Unduhan & Pemindahan Berkas

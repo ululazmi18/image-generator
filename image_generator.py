@@ -58,8 +58,10 @@ CUSTOM_THEME = Theme(
 console = Console(theme=CUSTOM_THEME)
 
 # ==============================================================================
-# XPATH DEFINITIONS DARI SPESIFIKASI PENGGUNA
+# XPATH & SELECTOR DEFINITIONS DARI SPESIFIKASI & PENGUJIAN EMPIRIS
 # ==============================================================================
+FLOW_PROJECT_URL = "https://flow.google.com/project/8eed2cd9-e563-46d8-9ad2-395e53901db4"
+
 XPATH_PROMPT_INPUT = (
     "/html/body/aisandbox-root/main/flow-project-shell/flow-project-page/div[2]/"
     "flow-project-sidenav-container/mat-sidenav-container/mat-sidenav-content/div/"
@@ -93,6 +95,10 @@ XPATH_CONTEXT_MENU_ITEM_5 = (
     "flow-image-context-menu-items/flow-media-context-menu-items/flow-menu-item[5]"
 )
 
+# Item pertama di submenu resolusi unduhan adalah 1K (Ukuran asli)
+XPATH_SUBMENU_DOWNLOAD_1K = (
+    "//flow-menu-item[contains(., '1K') or contains(., 'Ukuran asli') or contains(., 'Original')]"
+)
 XPATH_SUBMENU_DOWNLOAD_ITEM_2 = (
     "/html/body/div[6]/div[2]/div/div/div/flow-menu-item[2]"
 )
@@ -359,6 +365,13 @@ class MarionetteDriver:
         """Beralih ke tab/jendela tertentu."""
         self.send("WebDriver:SwitchToWindow", {"handle": handle})
 
+    def navigate(self, url: str) -> None:
+        """Membuka atau mengarahkan tab aktif ke URL yang ditentukan."""
+        try:
+            self.send("WebDriver:Navigate", {"url": url})
+        except Exception:
+            self.execute_script("window.location.href = arguments[0];", [url])
+
     def take_screenshot(self, full: bool = False) -> bytes:
         """Mengambil tangkapan layar halaman web peramban (PNG) langsung dari viewport browser."""
         import base64
@@ -516,7 +529,24 @@ class ImageGenerator:
             except Exception:
                 continue
 
-        raise RuntimeError("Tab Google Flow tidak ditemukan. Pastikan halaman proyek Google Flow sudah terbuka di peramban.")
+        # Jika belum ada tab yang memuat Google Flow, arahkan tab aktif ke proyek Google Flow
+        console.print(f"[info]ℹ[/info] Tab Google Flow belum terbuka. Mengarahkan peramban ke [cyan]{FLOW_PROJECT_URL}[/cyan]...")
+        self.driver.switch_to_window(handles[0])
+        self.driver.navigate(FLOW_PROJECT_URL)
+        time.sleep(3.0)
+
+        # Tunggu sampai komponen utama Google Flow terpasang di DOM
+        for _ in range(25):
+            try:
+                info = self.driver.execute_script(detection_script)
+                if isinstance(info, dict) and (info.get("hasFlow") or "flow" in (info.get("url") or "").lower()):
+                    time.sleep(1.0)
+                    return handles[0]
+            except Exception:
+                pass
+            time.sleep(1.0)
+
+        return handles[0]
 
     def submit_prompt(self, prompt_text: str) -> bool:
         """Memasukkan prompt via Solusi 1 (Native OS Input: Clipboard + Ctrl+V + Enter)."""
@@ -670,7 +700,7 @@ class ImageGenerator:
         raise TimeoutError(f"Waktu tunggu generasi gambar habis ({timeout} detik). Gambar belum selesai dirender.")
 
     def click_hotbar_and_download(self, timeout: int = 20) -> bool:
-        """Mengeklik hotbar opsi, men-hover menu item 5, lalu mengeklik tombol download."""
+        """Mengeklik hotbar opsi (tombol 3), membuka menu 'Download', lalu mengeklik resolusi '1K (Ukuran asli)'."""
         # 1. Dapatkan koordinat tombol Hotbar Opsi (button[3]/mat-icon)
         get_hotbar_script = """
         const hotbarXpath = arguments[0];
@@ -680,7 +710,8 @@ class ImageGenerator:
 
         let hotbarBtn = getByXPath(hotbarXpath) ||
                         document.querySelector('flow-grid-tile-container flow-image-hotbar button:nth-child(3)') ||
-                        document.querySelector('flow-image-hotbar button:nth-child(3)');
+                        document.querySelector('flow-image-hotbar button:nth-child(3)') ||
+                        document.querySelector('flow-image-tile flow-image-hotbar button:last-child');
 
         if (!hotbarBtn) return { success: false, error: 'Tombol hotbar tidak ditemukan.' };
 
@@ -699,75 +730,92 @@ class ImageGenerator:
         NativeOSController.send_mouse_click(res_h["x"], res_h["y"])
         time.sleep(0.8)
 
-        # 2. Dapatkan koordinat Context Menu Item 5 & hover kursor fisik
-        get_menu5_script = """
+        # 2. Dapatkan koordinat Context Menu Item 'Download' & klik/hover kursor fisik
+        get_download_menu_script = """
         const menu5Xpath = arguments[0];
         function getByXPath(xpath) {
             try { return document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch (e) { return null; }
         }
 
-        let menu5 = getByXPath(menu5Xpath);
-        if (!menu5) {
-            const allItems = document.querySelectorAll('flow-image-context-menu-items flow-menu-item, flow-media-context-menu-items flow-menu-item');
-            if (allItems.length >= 5) {
-                menu5 = allItems[4];
+        let dlMenu = null;
+        const allItems = document.querySelectorAll('div.cdk-overlay-pane flow-menu-item, flow-image-context-menu-items flow-menu-item, [role="menuitem"]');
+        for (let item of allItems) {
+            const text = (item.innerText || '').trim().toLowerCase();
+            if (text.startsWith('download') || text.startsWith('unduh')) {
+                dlMenu = item;
+                break;
             }
         }
 
-        if (!menu5) return { success: false, error: 'Menu item 5 tidak ditemukan.' };
+        if (!dlMenu) {
+            dlMenu = getByXPath(menu5Xpath);
+        }
 
-        menu5.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-        menu5.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        if (!dlMenu && allItems.length >= 5) {
+            dlMenu = allItems[4];
+        }
 
-        const rect = menu5.getBoundingClientRect();
+        if (!dlMenu) return { success: false, error: 'Menu Download tidak ditemukan.' };
+
+        dlMenu.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+        dlMenu.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+
+        const rect = dlMenu.getBoundingClientRect();
         return {
             success: true,
             x: Math.round(window.mozInnerScreenX + rect.left + rect.width / 2),
             y: Math.round(window.mozInnerScreenY + rect.top + rect.height / 2)
         };
         """
-        res_m = self.driver.execute_script(get_menu5_script, [XPATH_CONTEXT_MENU_ITEM_5])
+        res_m = self.driver.execute_script(get_download_menu_script, [XPATH_CONTEXT_MENU_ITEM_5])
         if isinstance(res_m, dict) and res_m.get("success"):
             NativeOSController.send_mouse_move(res_m["x"], res_m["y"])
+            time.sleep(0.1)
+            # Klik atau hover menu download untuk memunculkan submenu resolusi
+            NativeOSController.send_mouse_click(res_m["x"], res_m["y"])
 
         time.sleep(0.8)
 
-        # 3. Dapatkan koordinat Submenu Item 2 (Download) & klik fisik
-        get_dl_script = """
-        const downloadXpath = arguments[0];
+        # 3. Dapatkan koordinat opsi '1K (Ukuran asli)' di submenu resolusi & klik fisik
+        get_1k_script = """
         function getByXPath(xpath) {
             try { return document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch (e) { return null; }
         }
 
-        let dlItem = getByXPath(downloadXpath);
-        if (!dlItem) {
-            const overlays = document.querySelectorAll('div.cdk-overlay-pane flow-menu-item, flow-menu-item');
-            for (let el of overlays) {
-                if ((el.innerText || '').toLowerCase().includes('download') || (el.innerText || '').toLowerCase().includes('unduh')) {
-                    dlItem = el;
-                    break;
-                }
-            }
-            if (!dlItem && overlays.length >= 2) {
-                dlItem = overlays[1];
+        let oneKItem = null;
+        const subItems = document.querySelectorAll('div.cdk-overlay-pane flow-menu-item, div.cdk-overlay-pane [role="menuitem"], div.cdk-overlay-pane button, flow-menu-item');
+        for (let sub of subItems) {
+            const text = (sub.innerText || '').trim();
+            if (text.includes('1K') || text.toLowerCase().includes('ukuran asli') || text.toLowerCase().includes('original size')) {
+                oneKItem = sub;
+                break;
             }
         }
 
-        if (!dlItem) return { success: false, error: 'Tombol download submenu tidak ditemukan.' };
+        if (!oneKItem) {
+            // Fallback ke item pertama pada overlay pane yang paling baru dibuka
+            const panes = document.querySelectorAll('div.cdk-overlay-pane');
+            if (panes.length > 0) {
+                const lastPane = panes[panes.length - 1];
+                oneKItem = lastPane.querySelector('flow-menu-item, [role="menuitem"], button');
+            }
+        }
 
-        const rect = dlItem.getBoundingClientRect();
+        if (!oneKItem) return { success: false, error: 'Opsi unduhan 1K (Ukuran asli) tidak ditemukan di submenu.' };
+
+        const rect = oneKItem.getBoundingClientRect();
         return {
             success: true,
             x: Math.round(window.mozInnerScreenX + rect.left + rect.width / 2),
             y: Math.round(window.mozInnerScreenY + rect.top + rect.height / 2)
         };
         """
-        res_dl = self.driver.execute_script(get_dl_script, [XPATH_SUBMENU_DOWNLOAD_ITEM_2])
-        if not isinstance(res_dl, dict) or not res_dl.get("success"):
-            raise RuntimeError(f"Gagal menemukan koordinat tombol download: {res_dl}")
+        res_1k = self.driver.execute_script(get_1k_script)
+        if not isinstance(res_1k, dict) or not res_1k.get("success"):
+            raise RuntimeError(f"Gagal menemukan koordinat tombol 1K (Ukuran asli): {res_1k}")
 
-        # Klik fisik tombol download
-        NativeOSController.send_mouse_click(res_dl["x"], res_dl["y"])
+        # Klik fisik opsi 1K untuk memicu pengunduhan berkas .jpg
+        NativeOSController.send_mouse_click(res_1k["x"], res_1k["y"])
         return True
 
     def wait_for_downloaded_file(self, existing_files: set[str], timeout: int = 60) -> Path:
