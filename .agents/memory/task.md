@@ -44,4 +44,10 @@
   - [x] Perbarui selector dan logika `click_hotbar_and_download()` pada `image_generator.py` dan `test_step_by_step.py` agar memilih opsi "1K (Ukuran asli)"
   - [x] Implementasi tangkapan layar murni halaman web (`driver.take_screenshot()`) tanpa frame Windows desktop
   - [x] Modifikasi `userChrome.css` untuk menghapus garis merah bergaris dan ikon robot peramban
-  - [x] Validasi sintaksis dan sinkronisasi basis data memori AST (76 entitas)
+  - [x] Validasi sintaksis dan sinkronisasi basis data memori AST (77 entitas)
+
+- [x] Alur Penghapusan Gambar ('Pindahkan ke sampah')
+  - [x] Pengujian empiris pada browser natif membuktikan `Pindahkan ke sampah` langsung menghapus tile gambar tanpa modal dialog konfirmasi
+  - [x] Bukti video rekaman `test_delete_flow_1792796065753.webp` dan screenshot kanvas bersih `media_1792796119211.png`
+  - [x] Integrasi method `delete_current_tile()` ke `ImageGenerator` pada `image_generator.py`
+  - [x] Penambahan LANGKAH 11 ke `test_step_by_step.py` lengkap dengan screenshot kanvas bersih pasca penghapusan

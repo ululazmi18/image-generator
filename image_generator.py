@@ -841,6 +841,82 @@ class ImageGenerator:
 
         raise TimeoutError(f"File .jpg hasil unduhan tidak terdeteksi di {self.download_dir} dalam {timeout} detik.")
 
+    def delete_current_tile(self, timeout: int = 15) -> bool:
+        """Menghapus gambar dari kanvas peramban ('Pindahkan ke sampah') setelah berhasil diunduh."""
+        NativeOSController.activate_window()
+        time.sleep(0.3)
+
+        # 1. Pastikan kursor hover ke tile gambar agar tombol hotbar muncul
+        hover_script = """
+        const tile = document.querySelector('flow-image-tile, flow-grid-tile-container');
+        if (!tile) return { success: false, error: 'Tile gambar tidak ditemukan di kanvas.' };
+        tile.scrollIntoView({ block: 'center' });
+        tile.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+        tile.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        const rect = tile.getBoundingClientRect();
+        return {
+            success: true,
+            x: Math.round(window.mozInnerScreenX + rect.left + rect.width / 2),
+            y: Math.round(window.mozInnerScreenY + rect.top + rect.height / 2)
+        };
+        """
+        res_t = self.driver.execute_script(hover_script)
+        if isinstance(res_t, dict) and res_t.get("success"):
+            NativeOSController.send_mouse_move(res_t["x"], res_t["y"])
+        time.sleep(0.5)
+
+        # 2. Dapatkan koordinat tombol Hotbar 3 (titik tiga / opsi lainnya)
+        hotbar_script = """
+        let btn = document.querySelector('flow-grid-tile-container flow-image-hotbar button:nth-child(3)') ||
+                  document.querySelector('flow-image-hotbar button:nth-child(3)') ||
+                  document.querySelector('flow-image-tile flow-image-hotbar button:last-child');
+        if (!btn) {
+            const tile = document.querySelector('flow-image-tile, flow-grid-tile-container');
+            if (tile) {
+                const buttons = tile.querySelectorAll('button');
+                const hotbarBtns = Array.from(buttons).filter(b => {
+                    const r = b.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                });
+                if (hotbarBtns.length >= 3) btn = hotbarBtns[2];
+            }
+        }
+        if (!btn) return { success: false, error: 'Tombol hotbar opsi tidak ditemukan.' };
+        const rect = btn.getBoundingClientRect();
+        return {
+            success: true,
+            x: Math.round(window.mozInnerScreenX + rect.left + rect.width / 2),
+            y: Math.round(window.mozInnerScreenY + rect.top + rect.height / 2)
+        };
+        """
+        res_h = self.driver.execute_script(hotbar_script)
+        if not isinstance(res_h, dict) or not res_h.get("success"):
+            raise RuntimeError(f"Gagal menemukan tombol opsi hotbar untuk penghapusan: {res_h}")
+
+        NativeOSController.send_mouse_click(res_h["x"], res_h["y"])
+        time.sleep(0.8)
+
+        # 3. Cari menu 'Pindahkan ke sampah' pada overlay menu konteks
+        trash_menu_script = """
+        const items = Array.from(document.querySelectorAll('button.mat-mdc-menu-item, [role="menuitem"], .mat-mdc-menu-item, flow-menu-item'));
+        const target = items.find(el => el.textContent && el.textContent.includes('Pindahkan ke sampah'));
+        if (!target) return { success: false, error: 'Menu Pindahkan ke sampah tidak ditemukan.' };
+        const rect = target.getBoundingClientRect();
+        return {
+            success: true,
+            x: Math.round(window.mozInnerScreenX + rect.left + rect.width / 2),
+            y: Math.round(window.mozInnerScreenY + rect.top + rect.height / 2)
+        };
+        """
+        res_trash = self.driver.execute_script(trash_menu_script)
+        if not isinstance(res_trash, dict) or not res_trash.get("success"):
+            raise RuntimeError(f"Gagal menemukan menu 'Pindahkan ke sampah': {res_trash}")
+
+        # Klik fisik opsi Pindahkan ke sampah
+        NativeOSController.send_mouse_click(res_trash["x"], res_trash["y"])
+        time.sleep(1.0)
+        return True
+
     def close(self) -> None:
         """Menutup koneksi driver."""
         self.driver.close()
@@ -899,6 +975,13 @@ def generate_image(
                 target_file = target_path
 
         shutil.move(str(downloaded_file), str(target_file))
+
+        # Hapus gambar dari kanvas peramban setelah berkas aman disimpan
+        try:
+            generator.delete_current_tile()
+        except Exception as del_err:
+            console.print(f"[warning]⚠ Catatan pembersihan: {del_err}[/warning]")
+
         return target_file
 
     finally:
@@ -1032,6 +1115,13 @@ def main() -> int:
                     target_file = target_path
 
             shutil.move(str(downloaded), str(target_file))
+
+            progress.update(task, description="[cyan]Menghapus gambar dari kanvas peramban (Pindahkan ke sampah)...")
+            try:
+                generator.delete_current_tile()
+            except Exception as del_err:
+                console.print(f"[warning]⚠ Catatan pembersihan: {del_err}[/warning]")
+
             generator.close()
 
         except Exception as e:

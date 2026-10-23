@@ -411,6 +411,16 @@ class StepByStepTester:
 
             self.capture_screenshot(10, "unduhan_selesai_dan_dipindahkan", f"File berhasil dipindahkan ke {target_file.name}.")
             console.print("[success]✓ Langkah 10 Selesai: Berkas berhasil diunduh dan dipindahkan.[/success]\n")
+            self.step_pause("Berkas telah diunduh dan dipindahkan.")
+
+            # ------------------------------------------------------------------
+            # LANGKAH 11: Menghapus Gambar dari Peramban ('Pindahkan ke sampah')
+            # ------------------------------------------------------------------
+            console.print(Panel("[bold cyan]LANGKAH 11:[/bold cyan] Menghapus Gambar dari Kanvas Peramban ('Pindahkan ke sampah')", box=box.SIMPLE))
+            self.generator.delete_current_tile()
+            time.sleep(1.2)
+            self.capture_screenshot(11, "gambar_dihapus_ke_sampah", "Gambar berhasil dipindahkan ke sampah dan kanvas kembali bersih.")
+            console.print("[success]✓ Langkah 11 Selesai: Gambar berhasil dipindahkan ke sampah.[/success]\n")
 
         except Exception as e:
             console.print(f"\n[error]✗ Uji Coba Terhenti karena Kesalahan:[/error] {e}")
