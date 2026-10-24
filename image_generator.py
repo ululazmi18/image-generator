@@ -1160,7 +1160,7 @@ class ImageGenerator:
         self.aspect_ratio = target_ratio
         self.count_str = target_count
 
-        config_script = """
+        open_panel_script = """
         const targetModel = arguments[0];
         const targetRatio = arguments[1];
         const targetIcon = arguments[2];
@@ -1192,50 +1192,22 @@ class ImageGenerator:
         return { status: 'opened' };
         """
 
-        step2_script = """
+        # Tahap A: Periksa dan ubah model jika berbeda
+        check_model_script = """
         const targetModel = arguments[0];
-        const targetRatio = arguments[1];
-        const targetCount = arguments[2];
-
         const panel = document.querySelector('flow-prompt-box-settings');
         if (!panel) return { error: 'Panel tidak ditemukan' };
 
-        const toggles = Array.from(panel.querySelectorAll('mat-button-toggle'));
-
-        // A. Pastikan tab "Gambar" aktif
-        const imgToggle = toggles.find(t => (t.textContent || '').includes('Gambar'));
-        if (imgToggle && !imgToggle.classList.contains('mat-button-toggle-checked')) {
-            const btn = imgToggle.querySelector('button') || imgToggle;
-            btn.click();
-        }
-
-        // B. Atur Aspek Rasio (16:9, 4:3, 1:1, 3:4, 9:16)
-        const ratioToggle = toggles.find(t => (t.textContent || '').includes(targetRatio));
-        if (ratioToggle && !ratioToggle.classList.contains('mat-button-toggle-checked')) {
-            const btn = ratioToggle.querySelector('button') || ratioToggle;
-            btn.click();
-        }
-
-        // C. Atur Kuantitas Gambar (x1, x2, x3, x4)
-        const countToggle = toggles.find(t => (t.textContent || '').trim() === targetCount);
-        if (countToggle && !countToggle.classList.contains('mat-button-toggle-checked')) {
-            const btn = countToggle.querySelector('button') || countToggle;
-            btn.click();
-        }
-
-        // D. Periksa apakah model berbeda
         const modelBtn = panel.querySelector('button[aria-label="Pilih rangkaian model"]') ||
                          Array.from(panel.querySelectorAll('button')).find(b => (b.textContent || '').includes('Banana'));
-        let needModelMenu = false;
         if (modelBtn && !(modelBtn.textContent || '').includes(targetModel)) {
             modelBtn.click();
-            needModelMenu = true;
+            return { needChange: true };
         }
-
-        return { needModelMenu: needModelMenu };
+        return { needChange: false };
         """
 
-        step3_script = """
+        select_model_script = """
         const targetModel = arguments[0];
         const items = Array.from(document.querySelectorAll('.cdk-overlay-container [role="menuitem"], .mat-mdc-menu-item'));
         const targetItem = items.find(it => (it.textContent || '').includes(targetModel));
@@ -1246,7 +1218,53 @@ class ImageGenerator:
         return { clicked: false };
         """
 
-        close_script = """
+        # Tahap B: Atur tab Gambar, Aspek Rasio, dan Kuantitas
+        apply_toggles_script = """
+        const targetRatio = arguments[0];
+        const targetCount = arguments[1];
+
+        const panel = document.querySelector('flow-prompt-box-settings');
+        if (!panel) return { error: 'Panel tidak ditemukan' };
+
+        function clickToggle(toggle) {
+            if (!toggle) return false;
+            const target = toggle.querySelector('.toggle-label') ||
+                           toggle.querySelector('.mat-button-toggle-label-content') ||
+                           toggle;
+            target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+            target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+            target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            return toggle.classList.contains('mat-button-toggle-checked');
+        }
+
+        const toggles = Array.from(panel.querySelectorAll('mat-button-toggle'));
+
+        // 1. Pastikan tab "Gambar" aktif
+        const imgToggle = toggles.find(t => (t.textContent || '').includes('Gambar'));
+        if (imgToggle && !imgToggle.classList.contains('mat-button-toggle-checked')) {
+            clickToggle(imgToggle);
+        }
+
+        // 2. Atur Aspek Rasio (16:9, 4:3, 1:1, 3:4, 9:16)
+        const ratioToggle = toggles.find(t => (t.textContent || '').includes(targetRatio));
+        if (ratioToggle && !ratioToggle.classList.contains('mat-button-toggle-checked')) {
+            clickToggle(ratioToggle);
+        }
+
+        // 3. Atur Kuantitas Gambar (x1, x2, x3, x4)
+        const countToggle = toggles.find(t => (t.textContent || '').trim() === targetCount);
+        if (countToggle && !countToggle.classList.contains('mat-button-toggle-checked')) {
+            clickToggle(countToggle);
+        }
+
+        return {
+            imgChecked: imgToggle ? imgToggle.classList.contains('mat-button-toggle-checked') : false,
+            ratioChecked: ratioToggle ? ratioToggle.classList.contains('mat-button-toggle-checked') : false,
+            countChecked: countToggle ? countToggle.classList.contains('mat-button-toggle-checked') : false
+        };
+        """
+
+        close_panel_script = """
         const panel = document.querySelector('flow-prompt-box-settings');
         if (panel) {
             const trigger = document.querySelector('button.settings-trigger-button');
@@ -1258,23 +1276,51 @@ class ImageGenerator:
         """
 
         try:
-            res1 = self.driver.execute_script(config_script, [target_model, target_ratio, target_icon, target_count])
-            if isinstance(res1, dict) and res1.get("status") == "already_configured":
+            # 1. Tunggu hingga tombol trigger setelan tersedia di DOM
+            for _ in range(16):
+                has_trigger = self.driver.execute_script(
+                    "return !!(document.querySelector('button.settings-trigger-button') || "
+                    "document.querySelector('button[aria-label=\"Pemicu setelan\"]'));"
+                )
+                if has_trigger:
+                    break
+                time.sleep(0.4)
+
+            res_open = self.driver.execute_script(
+                open_panel_script,
+                [target_model, target_ratio, target_icon, target_count],
+            )
+            if isinstance(res_open, dict) and res_open.get("status") == "already_configured":
                 console.print(
                     f"[success]✓ Setelan aktif:[/success] [cyan]{target_model}[/cyan] | "
                     f"Rasio: [cyan]{target_ratio}[/cyan] | Kuantitas: [cyan]{target_count}[/cyan]"
                 )
                 return True
 
-            time.sleep(0.6)
-            res2 = self.driver.execute_script(step2_script, [target_model, target_ratio, target_count])
-            time.sleep(0.5)
+            # 2. Tunggu hingga panel flow-prompt-box-settings benar-benar terbuka
+            for _ in range(10):
+                has_panel = self.driver.execute_script("return !!document.querySelector('flow-prompt-box-settings');")
+                if has_panel:
+                    break
+                self.driver.execute_script(
+                    "const b = document.querySelector('button.settings-trigger-button') || "
+                    "document.querySelector('button[aria-label=\"Pemicu setelan\"]'); if (b) b.click();"
+                )
+                time.sleep(0.4)
 
-            if isinstance(res2, dict) and res2.get("needModelMenu"):
-                self.driver.execute_script(step3_script, [target_model])
+            # Langkah 1: Ubah model terlebih dahulu jika diperlukan
+            res_m = self.driver.execute_script(check_model_script, [target_model])
+            if isinstance(res_m, dict) and res_m.get("needChange"):
                 time.sleep(0.5)
+                self.driver.execute_script(select_model_script, [target_model])
+                time.sleep(0.6)
 
-            final_res = self.driver.execute_script(close_script)
+            # Langkah 2: Terapkan toggle tab gambar, aspek rasio, dan jumlah variasi
+            self.driver.execute_script(apply_toggles_script, [target_ratio, target_count])
+            time.sleep(0.4)
+
+            # Langkah 3: Tutup panel setelan
+            final_res = self.driver.execute_script(close_panel_script)
             final_summary = final_res.get("summary") if isinstance(final_res, dict) else ""
             console.print(
                 f"[success]✓ Setelan dikonfigurasi:[/success] [cyan]{target_model}[/cyan] | "
