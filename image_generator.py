@@ -1003,7 +1003,8 @@ class ImageGenerator:
 
         input_script = """
         const prompt = arguments[0];
-        const editor = document.querySelector('flow-rich-text-editor div[contenteditable="true"]') ||
+        const editor = document.querySelector('.ProseMirror[contenteditable="true"]') ||
+                       document.querySelector('flow-rich-text-editor div[contenteditable="true"]') ||
                        document.querySelector('flow-rich-text-editor p') ||
                        document.querySelector('div[contenteditable="true"]');
         if (!editor) return { success: false, error: 'Editor prompt tidak ditemukan.' };
@@ -1027,11 +1028,15 @@ class ImageGenerator:
         if not isinstance(res_in, dict) or not res_in.get("success"):
             raise RuntimeError(f"Gagal memasukkan teks prompt: {res_in}")
 
+        console.print(f"[info]ℹ[/info] Mengirim prompt: [cyan]{prompt_text}[/cyan]")
         time.sleep(0.5)
 
         # Klik tombol generate via Gecko C++ native click / DOM click
         click_btn_script = """
         const candidates = [
+            'button.generate-icon-button',
+            'button[aria-label="Mulai pembuatan"]',
+            'button[type="submit"]',
             'flow-generate-icon-button button',
             'button.generate-button',
             'button[aria-label="Kirim"]',
@@ -1047,7 +1052,7 @@ class ImageGenerator:
             }
         }
         // Fallback: picu event Enter pada editor
-        const editor = document.querySelector('flow-rich-text-editor div[contenteditable="true"], div[contenteditable="true"]');
+        const editor = document.querySelector('.ProseMirror[contenteditable="true"], div[contenteditable="true"]');
         if (editor) {
             editor.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13 }));
             return { success: true, method: 'enter_key' };
