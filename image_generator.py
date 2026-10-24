@@ -988,8 +988,8 @@ def generate_image(
     prompt: str,
     output_path: str | Path | None = None,
     timeout: int = 180,
-    max_retries: int = 3,
-    retry_delay: float = 6.0,
+    max_retries: int | None = None,
+    retry_delay: float = 12.0,
     auto_launch: bool = True,
     **kwargs: object,
 ) -> Path:
@@ -1005,10 +1005,11 @@ def generate_image(
     6. Memindahkan file gambar dari folder unduhan ke direktori tujuan yang diminta.
     7. Menghapus tile gambar dari kanvas Google Flow ('Pindahkan ke sampah').
 
-    Fitur Pemulihan Mandiri (Auto-Retry on Failure):
+    Fitur Pemulihan Mandiri Tanpa Batas (Unlimited Self-Healing Auto-Retry):
     Jika proses render gagal di sisi Google Flow (misal terkena batas penggunaan atau kendala
     server), fungsi secara otomatis mendeteksi tile gagal, membersihkannya dari kanvas,
-    dan langsung mengulang proses mulai dari input prompt hingga batas `max_retries`.
+    menunggu jeda cooldown, menyegarkan halaman jika diperlukan, dan terus mencoba ulang
+    tanpa batasan sampai berkas gambar berhasil diperoleh.
 
     Args:
         prompt (str): Deskripsi teks gambar yang ingin dibuat.
@@ -1017,8 +1018,8 @@ def generate_image(
             - Jika berupa path berkas .jpg: berkas disimpan persis dengan nama tersebut.
             - Jika None: otomatis disimpan di folder 'outputs/' pada root workspace.
         timeout (int): Batas waktu maksimal proses pembuatan gambar per percobaan dalam detik (default: 180).
-        max_retries (int): Jumlah maksimal pengulangan percobaan jika generasi gagal (default: 3).
-        retry_delay (float): Jeda waktu dalam detik sebelum mengulang percobaan berikutnya (default: 6.0).
+        max_retries (int | None): Batas maksimal percobaan ulang (default: None, mengulang tanpa batas).
+        retry_delay (float): Jeda waktu dalam detik sebelum mengulang percobaan berikutnya (default: 12.0).
         auto_launch (bool): Luncurkan Firefox Portable secara otomatis jika belum berjalan (default: True).
         **kwargs: Parameter opsional kompatibilitas mundur (misal jika parameter `headless` dioper).
 
@@ -1027,21 +1028,13 @@ def generate_image(
 
     Raises:
         RuntimeError: Jika seluruh percobaan gagal atau terjadi kegagalan fatal koneksi peramban.
-        TimeoutError: Jika waktu tunggu pembuatan gambar atau pengunduhan habis di semua percobaan.
+        TimeoutError: Jika waktu tunggu pembuatan gambar atau pengunduhan habis.
 
     Example:
         >>> from image_generator import generate_image
-        >>> # Simpan otomatis ke folder outputs/ (100% native headless dengan auto-retry)
+        >>> # Simpan otomatis ke folder outputs/ (100% native headless & auto-retry tanpa batas)
         >>> file_path = generate_image("pemandangan danau pegunungan berkabut saat fajar")
         >>> print("Gambar disimpan di:", file_path)
-        >>>
-        >>> # Kustomisasi nama berkas, batas percobaan, dan lokasi tujuan
-        >>> file_kustom = generate_image(
-        ...     prompt="cyberpunk robot cat neon city",
-        ...     output_path="D:/Project/assets/hero_image.jpg",
-        ...     timeout=200,
-        ...     max_retries=5
-        ... )
     """
     generator = ImageGenerator()
 
@@ -1051,10 +1044,25 @@ def generate_image(
         generator.find_flow_tab()
 
         last_error = None
-        for attempt in range(1, max_retries + 1):
+        attempt = 1
+        while True:
+            if max_retries is not None and attempt > max_retries:
+                raise RuntimeError(
+                    f"Gagal membuat gambar setelah {max_retries} kali percobaan berturut-turut. Kesalahan terakhir: {last_error}"
+                )
+
             try:
                 # Bersihkan sisa tile gagal sebelumnya jika ada di kanvas
                 generator.clean_failed_tiles()
+
+                # Segarkan halaman jika beberapa kali percobaan berturut-turut gagal
+                if attempt > 1 and attempt % 4 == 0:
+                    try:
+                        generator.driver.navigate(FLOW_PROJECT_URL)
+                        time.sleep(3.5)
+                        generator.find_flow_tab()
+                    except Exception:
+                        pass
 
                 existing = {
                     str(f.resolve())
@@ -1096,18 +1104,13 @@ def generate_image(
             except (GenerationFailedError, TimeoutError) as attempt_err:
                 last_error = attempt_err
                 generator.clean_failed_tiles()
-                if attempt < max_retries:
-                    console.print(
-                        f"[warning]⚠ Percobaan {attempt}/{max_retries} terdeteksi gagal ({attempt_err}). "
-                        f"Mengulang dari input prompt dalam {retry_delay:.0f} detik...[/warning]"
-                    )
-                    time.sleep(retry_delay)
-                else:
-                    raise RuntimeError(
-                        f"Gagal membuat gambar setelah {max_retries} kali percobaan berturut-turut. Kesalahan terakhir: {attempt_err}"
-                    )
-
-        raise RuntimeError(f"Gagal membuat gambar setelah {max_retries} kali percobaan. Kesalahan: {last_error}")
+                retry_tag = f"Percobaan ke-{attempt}" if max_retries is None else f"Percobaan {attempt}/{max_retries}"
+                console.print(
+                    f"[warning]⚠ {retry_tag} terdeteksi gagal ({attempt_err}). "
+                    f"Mengulang dari input prompt dalam {retry_delay:.0f} detik...[/warning]"
+                )
+                time.sleep(retry_delay)
+                attempt += 1
 
     finally:
         generator.close()
@@ -1116,23 +1119,23 @@ def generate_image(
 # ==============================================================================
 # CLI PARSER & INTERFACE RUNNER
 # ==============================================================================
-def parse_cli_args() -> tuple[str, str | None, int, int]:
+def parse_cli_args() -> tuple[str, str | None, int]:
     """Mengekstrak parameter baris perintah (CLI) dengan dukungan prompt tanpa wajib tanda petik.
 
-    Peramban selalu dijalankan secara 100% otomatis dalam mode native headless di latar belakang.
+    Peramban selalu dijalankan secara 100% otomatis dalam mode native headless di latar belakang,
+    dan memiliki mekanisme auto-retry tanpa batas sampai gambar berhasil dibuat.
 
     Mendukung opsi:
     - `--prompt` / `-p`: Teks prompt (seluruh kata setelah opsi ini digabungkan otomatis).
     - `--output` / `-o` / `--dest` / `-d`: Folder atau nama berkas tujuan pemindahan.
     - `--timeout` / `-t`: Batas waktu maksimal generasi per percobaan dalam detik (default: 180).
-    - `--retries` / `-r`: Jumlah maksimal percobaan ulang jika generasi gagal (default: 3).
 
     Returns:
-        tuple[str, str | None, int, int]: (prompt_text, output_dest, timeout, max_retries)
+        tuple[str, str | None, int]: (prompt_text, output_dest, timeout)
 
     Example:
         `python image_generator.py --prompt pemandangan gunung es -o hasil/`
-        `run.bat --prompt robot astronot di planet mars --retries 5`
+        `run.bat --prompt robot astronot di planet mars`
     """
     args = sys.argv[1:]
     output_flags = ["--output", "-o", "--dest", "-d"]
@@ -1143,7 +1146,6 @@ def parse_cli_args() -> tuple[str, str | None, int, int]:
 
     output_val = None
     timeout_val = 180
-    retries_val = 3
     prompt_tokens = []
 
     # Konsumsi flag --headless jika masih dioper oleh pengguna agar kompatibel
@@ -1162,10 +1164,7 @@ def parse_cli_args() -> tuple[str, str | None, int, int]:
                 pass
             i += 2
         elif arg in retries_flags and i + 1 < len(args):
-            try:
-                retries_val = int(args[i + 1])
-            except ValueError:
-                pass
+            # Diabaikan secara anggun jika pengguna lama masih mengetik flag retries
             i += 2
         elif arg in prompt_flags:
             i += 1
@@ -1180,11 +1179,8 @@ def parse_cli_args() -> tuple[str, str | None, int, int]:
                         pass
                     i += 2
                 elif args[i] in retries_flags:
-                    try:
-                        retries_val = int(args[i + 1])
-                    except (ValueError, IndexError):
-                        pass
-                    i += 2
+                    # Diabaikan jika ada di tengah token prompt
+                    i += 2 if i + 1 < len(args) else 1
                 else:
                     prompt_tokens.append(args[i])
                     i += 1
@@ -1194,11 +1190,11 @@ def parse_cli_args() -> tuple[str, str | None, int, int]:
             i += 1
 
     prompt_str = " ".join(prompt_tokens).strip()
-    return prompt_str, output_val, timeout_val, retries_val
+    return prompt_str, output_val, timeout_val
 
 
 def main() -> int:
-    """Titik masuk eksekusi utama CLI dengan antarmuka Rich terminal dan auto-retry dinamis.
+    """Titik masuk eksekusi utama CLI dengan antarmuka Rich terminal dan auto-retry tanpa batas.
 
     Returns:
         int: Kode keluar proses (0 jika sukses, 1 jika terjadi kegagalan).
@@ -1210,7 +1206,7 @@ def main() -> int:
     )
     console.print(Panel(banner, box=box.ROUNDED, style="color(240)"))
 
-    prompt, output_dest, timeout, max_retries = parse_cli_args()
+    prompt, output_dest, timeout = parse_cli_args()
 
     if not prompt:
         console.print(
@@ -1230,14 +1226,14 @@ def main() -> int:
     table.add_row("Prompt Teks", f"[gold]{prompt}[/gold]")
     table.add_row("Metode Eksekusi", "[bold green]100% Silent Background (Zero Cursor Hijacking)[/bold green]")
     table.add_row("Mode Tampilan", "[bold yellow]100% Native Headless (Tanpa GUI)[/bold yellow]")
-    table.add_row("Maksimal Percobaan", f"[cyan]{max_retries}x (Auto-Retry jika Gagal)[/cyan]")
+    table.add_row("Auto-Retry Penanganan", "[bold green]Tanpa Batas (Loop sampai ada hasil)[/bold green]")
     table.add_row("Target Pemindahan", f"[accent]{target_display}[/accent]")
     table.add_row("Batas Waktu (Timeout)", f"{timeout} detik/percobaan")
     console.print(table)
 
     target_file = None
     successful_attempt = 1
-    retry_delay = 6.0
+    retry_delay = 12.0
 
     with Progress(
         SpinnerColumn(),
@@ -1255,11 +1251,24 @@ def main() -> int:
             generator.find_flow_tab()
 
             success = False
-            last_err = None
+            attempt = 1
 
-            for attempt in range(1, max_retries + 1):
+            while not success:
                 try:
                     generator.clean_failed_tiles()
+
+                    # Segarkan halaman jika beberapa kali percobaan berturut-turut gagal
+                    if attempt > 1 and attempt % 4 == 0:
+                        progress.update(
+                            task,
+                            description=f"[cyan]Menyegarkan halaman Google Flow (Percobaan ke-{attempt})...[/cyan]",
+                        )
+                        try:
+                            generator.driver.navigate(FLOW_PROJECT_URL)
+                            time.sleep(3.5)
+                            generator.find_flow_tab()
+                        except Exception:
+                            pass
 
                     existing = {
                         str(f.resolve())
@@ -1269,7 +1278,7 @@ def main() -> int:
                     if attempt > 1:
                         progress.update(
                             task,
-                            description=f"[cyan]Mengulang input prompt (Percobaan {attempt}/{max_retries})...[/cyan]",
+                            description=f"[cyan]Mengulang input prompt (Percobaan ke-{attempt} - Tanpa Batas)...[/cyan]",
                         )
                     else:
                         progress.update(task, description="[cyan]Mengirim prompt secara senyap (ProseMirror DOM)...")
@@ -1278,14 +1287,14 @@ def main() -> int:
 
                     progress.update(
                         task,
-                        description=f"[gold]Menunggu render gambar (Percobaan {attempt}/{max_retries})...[/gold]",
+                        description=f"[gold]Menunggu render gambar (Percobaan ke-{attempt})...[/gold]",
                     )
                     generator.hover_and_wait_tile(
                         initial_state=initial_state,
                         timeout=timeout,
                         progress_callback=lambda p: progress.update(
                             task,
-                            description=f"[gold]Menunggu render gambar selesai ({p}% - Percobaan {attempt}/{max_retries})...[/gold]",
+                            description=f"[gold]Menunggu render gambar selesai ({p}% - Percobaan ke-{attempt})...[/gold]",
                         ),
                     )
 
@@ -1326,21 +1335,13 @@ def main() -> int:
                     break
 
                 except (GenerationFailedError, TimeoutError) as attempt_err:
-                    last_err = attempt_err
                     generator.clean_failed_tiles()
-                    if attempt < max_retries:
-                        progress.update(
-                            task,
-                            description=f"[warning]⚠ Percobaan {attempt}/{max_retries} gagal ({attempt_err}). Mengulang input prompt dalam {retry_delay:.0f}s...[/warning]",
-                        )
-                        time.sleep(retry_delay)
-                    else:
-                        raise RuntimeError(
-                            f"Gagal membuat gambar setelah {max_retries} kali percobaan: {attempt_err}"
-                        )
-
-            if not success:
-                raise RuntimeError(f"Gagal setelah {max_retries} percobaan: {last_err}")
+                    progress.update(
+                        task,
+                        description=f"[warning]⚠ Percobaan ke-{attempt} gagal ({attempt_err}). Menunggu cooldown {retry_delay:.0f}s sebelum mencoba ulang...[/warning]",
+                    )
+                    time.sleep(retry_delay)
+                    attempt += 1
 
         except Exception as e:
             console.print(f"\n[error]✗ Kegagalan Otomasi:[/error] {e}")
@@ -1354,7 +1355,7 @@ def main() -> int:
     summary_table.add_row("Status Generasi", "[bold green]✓ Selesai & Terverifikasi[/bold green]")
     summary_table.add_row("Interupsi Kursor Pengguna", "[bold green]✓ 0% (Kursor Bebas Digunakan)[/bold green]")
     summary_table.add_row("Mode Tampilan Jendela", "[bold green]✓ 100% Native Headless (Tanpa GUI)[/bold green]")
-    summary_table.add_row("Auto-Retry Penanganan Gagal", f"[bold green]✓ Berhasil pada Percobaan {successful_attempt}/{max_retries}[/bold green]")
+    summary_table.add_row("Auto-Retry Penanganan Gagal", f"[bold green]✓ Berhasil pada Percobaan ke-{successful_attempt} (Tanpa Batas)[/bold green]")
     summary_table.add_row("Hotbar & Download 1K", "[bold green]✓ Berhasil Diunduh Resolusi Asli[/bold green]")
     summary_table.add_row("Pembersihan Kanvas", "[bold green]✓ Dipindahkan ke Sampah[/bold green]")
     summary_table.add_row("File Hasil Gambar", f"[bold green]{target_file}[/bold green]")
@@ -1365,7 +1366,7 @@ def main() -> int:
             f"[bold green]BERHASIL MENGHASILKAN & MENGUNDUH GAMBAR SECARA SENYAP![/bold green]\n\n"
             f"[muted]Prompt:[/muted] [gold]{prompt}[/gold]\n"
             f"[muted]Lokasi Berkas:[/muted] [white]{target_file}[/white]\n"
-            f"[muted]Percobaan:[/muted] [green]Berhasil pada percobaan {successful_attempt}/{max_retries}[/green]\n"
+            f"[muted]Percobaan:[/muted] [green]Berhasil pada percobaan ke-{successful_attempt} (Loop tanpa batas)[/green]\n"
             f"[muted]Kursor Mouse:[/muted] [green]Tidak tersentuh sama sekali selama proses berlangsung[/green]",
             box=box.ROUNDED,
             style="color(240)",

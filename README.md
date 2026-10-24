@@ -38,16 +38,13 @@ Skrip akan menampilkan banner antarmuka, meminta Anda memasukkan teks prompt, la
 Argumen prompt dapat diketik langsung tanpa tanda petik:
 
 ```powershell
-# 1. Menghasilkan gambar dengan prompt langsung (100% otomatis headless)
+# 1. Menghasilkan gambar dengan prompt langsung (100% otomatis headless & retry tanpa batas)
 .\run.bat --prompt pemandangan danau pegunungan saat fajar berkabut
 
 # 2. Menentukan direktori/nama file tujuan (-o / --output)
 .\run.bat --prompt kucing lucu di taman bunga sakura -o outputs/
 
-# 3. Kustomisasi batas percobaan ulang jika generasi gagal (-r / --retries)
-.\run.bat --prompt robot astronot di planet mars --retries 5
-
-# 4. Kustomisasi batas waktu per percobaan (timeout dalam detik)
+# 3. Kustomisasi batas waktu per percobaan (timeout dalam detik)
 .\run.bat --timeout 240 --prompt kastil megah fantasi di puncak tebing bersalju
 ```
 
@@ -55,22 +52,20 @@ Argumen prompt dapat diketik langsung tanpa tanda petik:
 
 ## 3. Penggunaan Sebagai Modul Python (*Callable API*)
 
-Modul [image_generator.py](file:///d:/Documents/Image%20Generator/image_generator.py) memiliki dokumentasi tipe dan docstrings lengkap (*hover tooltip* di editor IDE). Dapat diimpor langsung oleh skrip atau modul lain, dan secara permanen selalu berjalan dalam mode native headless di latar belakang dengan dukungan pemulihan mandiri (*self-healing auto-retry*):
+Modul [image_generator.py](file:///d:/Documents/Image%20Generator/image_generator.py) memiliki dokumentasi tipe dan docstrings lengkap (*hover tooltip* di editor IDE). Dapat diimpor langsung oleh skrip atau modul lain, dan secara permanen selalu berjalan dalam mode native headless di latar belakang dengan dukungan pemulihan mandiri tanpa batas (*unlimited self-healing auto-retry*):
 
 ```python
 from image_generator import generate_image
 
-# 1. Simpan otomatis ke folder default (outputs/) — 100% native headless & auto-retry jika gagal
+# 1. Simpan otomatis ke folder default (outputs/) — 100% native headless & auto-retry tanpa batas
 file_gambar = generate_image("pemandangan matahari terbenam di pantai tropis")
 print("Tersimpan di:", file_gambar)
 
-# 2. Kustomisasi folder tujuan, batas timeout, dan maksimal pengulangan jika gagal
+# 2. Kustomisasi folder tujuan dan batas timeout per percobaan
 file_kustom = generate_image(
     prompt="cyberpunk neon city futuristic car",
     output_path="D:/Project/assets/hero.jpg",
-    timeout=180,
-    max_retries=5,
-    retry_delay=6.0
+    timeout=200,
 )
 ```
 
@@ -78,8 +73,8 @@ file_kustom = generate_image(
 
 ## 4. Keunggulan Arsitektur Silent Background
 
-1. **Auto-Retry & Self-Healing:**
-   Google Flow terkadang gagal merender (misal: "Anda telah mencapai batas penggunaan" atau server error). Skrip mendeteksi tile kegagalan secara instan dalam 1–2 detik, membersihkannya dari kanvas, dan secara otomatis langsung mengulang proses mulai dari input prompt hingga berhasil.
+1. **Auto-Retry Tanpa Batas & Self-Healing:**
+   Google Flow terkadang gagal merender (misal: "Anda telah mencapai batas penggunaan" atau server error). Skrip mendeteksi tile kegagalan secara instan dalam 1–2 detik, membersihkannya dari kanvas, melakukan cooldown dan penyegaran halaman berkala, serta mengulang proses secara mandiri tanpa batasan (*unlimited loop*) sampai berkas gambar 100% berhasil dihasilkan dan diunduh.
 2. **Zero Cursor Hijacking (0% Interupsi Kursor):**
    Tidak menyentuh mouse kursor fisik Windows, clipboard OS, atau keyboard hardware. Pengguna bebas mengetik, bekerja, atau bermain game tanpa interupsi.
 3. **100% Native Headless Mode:**
