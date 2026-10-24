@@ -38,6 +38,7 @@ import socket
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 # Standar encoding UTF-8 untuk terminal Windows
@@ -170,7 +171,32 @@ class MarionetteDriver:
         res = self.send("WebDriver:NewSession", {})
         self.session_id = res.get("sessionId")
         self.send("Marionette:SetContext", {"value": "content"})
+
+        # Menginjeksi ekstensi stealth native Gecko untuk mengeliminasi flag navigator.webdriver
+        self._install_stealth_addon()
+
         return self.session_id
+
+    def _install_stealth_addon(self) -> None:
+        """Mengompilasi dan menginstal WebExtension stealth secara otomatis ke sesi Marionette."""
+        addon_dir = Path(__file__).resolve().parent / "stealth_addon"
+        manifest_file = addon_dir / "manifest.json"
+        if not manifest_file.exists():
+            return
+
+        xpi_path = addon_dir / "stealth_addon.xpi"
+        try:
+            with zipfile.ZipFile(xpi_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for item in addon_dir.iterdir():
+                    if item.name.endswith(".xpi"):
+                        continue
+                    if item.is_file():
+                        zf.write(item, item.name)
+
+            self.send("Addon:Install", {"path": str(xpi_path.resolve()), "temporary": True})
+        except Exception:
+            # Tetap lanjutkan jika instalasi addon gagal agar tidak menghambat operasional
+            pass
 
     def send(self, name: str, parameters: dict | None = None) -> dict:
         """Mengirimkan perintah berformat Marionette JSON wire protocol ke peramban.

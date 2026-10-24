@@ -183,6 +183,26 @@ except ImportError:
             self._read_response()
             res = self._send_command("WebDriver:NewSession", {"capabilities": {}})
             self.session_id = res.get("sessionId")
+            self._send_command("Marionette:SetContext", {"value": "content"})
+            self._install_stealth_addon()
+
+        def _install_stealth_addon(self) -> None:
+            import zipfile
+            addon_dir = WORKSPACE_DIR / "stealth_addon"
+            manifest_file = addon_dir / "manifest.json"
+            if not manifest_file.exists():
+                return
+            xpi_path = addon_dir / "stealth_addon.xpi"
+            try:
+                with zipfile.ZipFile(xpi_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    for item in addon_dir.iterdir():
+                        if item.name.endswith(".xpi"):
+                            continue
+                        if item.is_file():
+                            zf.write(item, item.name)
+                self._send_command("Addon:Install", {"path": str(xpi_path.resolve()), "temporary": True})
+            except Exception:
+                pass
 
         def _send_command(self, name: str, params: dict | None = None) -> dict:
             self.msg_id += 1

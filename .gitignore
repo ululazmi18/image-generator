@@ -14,6 +14,7 @@ venv/
 *.log
 temp/
 tmp/
+scratch/
 .cache/
 
 # Environment Variables
@@ -30,3 +31,4 @@ reports/
 # Portable Browser Binaries & Downloaders
 firefox_portable/
 *.paf.exe
+*.xpi
