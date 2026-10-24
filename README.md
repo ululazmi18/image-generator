@@ -1,36 +1,23 @@
 # Google Flow Image Generator 🎨🚀
 
-> **Autonomous AI Image Generator Client for Google Flow — Connected to Browser Engine Repo.**  
+> **Autonomous AI Image Generator Client for Google Flow.**  
 > *100% Gratis, Tanpa Kuota Berbayar, Tanpa Mengganggu Kursor Pengguna (Zero Cursor Hijacking).*
 
 ---
 
-## 🌟 Arsitektur Ekosistem 2 Repositori
+## 🌟 Gambaran Sistem
 
-Repositori ini dirancang khusus sebagai **klien generator gambar cerdas** yang terhubung secara modular dengan **Repositori Browser (Browser Engine Repo)**:
+Generator gambar AI otomatis yang bekerja langsung dengan antarmuka **Google Flow** secara senyap di latar belakang (*silent background*):
 
 ```mermaid
 graph LR
-    subgraph Repo 1: Browser Engine Repo
-        B[Firefox Portable Environment]
-        P[Isolated Profile & Google Login]
-        S[Native Gecko Marionette Port 2828]
-    end
-
-    subgraph Repo 2: Image Generator Repo [Repo Ini]
-        IG[image_generator.py / run.bat]
-        M[Multi-Model & Multi-Ratio Engine]
-        O[Auto-Download 1K & Canvas Cleaner]
-    end
-
-    S <-->|Soket TCP 127.0.0.1:2828| IG
-    IG -->|Hasil Gambar Resolusi 1K| O
+    CLI[run.bat / CLI / Python Script] --> IG[image_generator.py Engine]
+    IG <-->|Soket Marionette 127.0.0.1:2828| FF[Firefox Headless / Google Flow]
+    IG -->|Unduh Gambar 1K & Bersihkan Kanvas| OUT[Direktori outputs/]
 ```
 
-1. **Repo 1 — Browser Engine Repo:**  
-   Menyiapkan peramban Firefox Portable, memelihara sesi profil Google yang terisolasi, mengonfigurasi WebExtension stealth anti-deteksi bot, serta membuka port otomasi Marionette (`127.0.0.1:2828`).
-2. **Repo 2 — Image Generator Repo (Repo Ini):**  
-   Klien otomasi mandiri tanpa dependensi browser berat. Bertugas mengeksekusi teks prompt, memilih setelan model AI dan aspek rasio, memantau progres pembuatan gambar hingga selesai, mengunduh berkas resolusi asli 1K, dan membersihkan kanvas secara otomatis.
+1. **Otomasi Latar Belakang:** Berkomunikasi langsung via protokol soket Gecko Marionette tanpa Selenium/WebDriver eksternal, sehingga tidak mengontrol mouse fisik maupun keyboard sistem (*zero cursor hijacking*).
+2. **Siklus Lengkap:** Mengisi prompt, mengatur model AI & rasio layar, memantau progres pembuatan gambar hingga 100%, mengunduh resolusi asli 1K, dan membersihkan tile dari kanvas secara otomatis.
 
 ---
 
@@ -38,7 +25,7 @@ graph LR
 
 - 💎 **100% Free & Unlimited:** Memanfaatkan Google Flow tanpa memerlukan kunci API berbayar atau langganan kuota.
 - 🥷 **Silent Background & Zero Cursor Hijacking:** Beroperasi di latar belakang menggunakan komunikasi soket native Marionette murni. Anda bebas mengetik, bekerja, atau bermain game tanpa kursor mouse terganggu.
-- 🔌 **Koneksi Modular ke Repo Browser:** Cukup pastikan peramban dari Repo Browser aktif mendengarkan port 2828, generator gambar akan langsung terhubung secara instan.
+- 🔌 **Koneksi Soket Marionette:** Terhubung langsung ke peramban melalui port Marionette (`127.0.0.1:2828`) secara instan dan efisien.
 - 📐 **Setelan Aspek Rasio Lengkap:**
   - `16:9` Widescreen Cinematic (`1376 × 768` px) — Thumbnail YouTube, Wallpaper.
   - `4:3` Klasik Landscape (`1152 × 896` px) — Presentasi, Layar Klasik.
@@ -72,15 +59,15 @@ Image Generator/
 
 ---
 
-## 🚀 Panduan Memulai & Menghubungkan
+## 🚀 Panduan Memulai
 
-### 1. Prasyarat & Koneksi ke Repo Browser
-1. Jalankan peramban dari **Repo Browser** Anda dengan port Marionette aktif (`127.0.0.1:2828`).
+### 1. Prasyarat
+1. Pastikan peramban Firefox telah berjalan dengan opsi Marionette aktif (`127.0.0.1:2828`).
 2. Pastikan akun Google Anda telah login dan dapat membuka layanan [Google Flow](https://labs.google/fx/tools/flow).
 
-> **Tips:** Jika peramban belum berjalan, skrip ini dapat meluncurkan Firefox Portable secara otomatis jika terdeteksi di lokasi standar (`D:\FirefoxPortable\App\Firefox64\firefox.exe`) atau melalui environment variable:
+> **Tips:** Jika peramban belum berjalan, skrip ini dapat meluncurkan Firefox secara otomatis jika terdeteksi di lokasi standar (`D:\FirefoxPortable\App\Firefox64\firefox.exe`) atau melalui environment variable:
 > - `FIREFOX_BIN`: Jalur ke berkas executable `firefox.exe`.
-> - `BROWSER_PROFILE`: Jalur ke folder profil browser terisolasi.
+> - `BROWSER_PROFILE`: Jalur ke folder profil browser.
 
 ### 2. Instalasi Dependensi
 Buka terminal pada folder proyek ini, lalu pasang dependensi:
