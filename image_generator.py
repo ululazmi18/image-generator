@@ -297,6 +297,18 @@ class MarionetteDriver:
         """
         self.send("WebDriver:ElementClick", {"id": element_id})
 
+    def send_keys(self, element_id: str, text: str) -> None:
+        """Mengirimkan pengetikan teks native (Gecko C++ keystrokes) ke elemen input.
+
+        Aksi ini memicu event input, keydown, dan keyup asli peramban sehingga model
+        state editor kompleks (seperti ProseMirror di Google Flow) terbarui secara instan.
+
+        Args:
+            element_id (str): Identifier elemen W3C hasil find_element().
+            text (str): Teks yang akan diketikkan ke dalam elemen.
+        """
+        self.send("WebDriver:ElementSendKeys", {"id": element_id, "text": text})
+
     def get_window_handles(self) -> list[str]:
         """Mengambil daftar seluruh handle jendela atau tab yang sedang terbuka di Firefox.
 
@@ -390,7 +402,7 @@ class ImageGenerator:
 
         self.profile_dir = self.workspace_dir / "browser_profile"
         self.ff_bin = Path(r"D:\FirefoxPortable\App\Firefox64\firefox.exe")
-        self.download_dir = self._detect_download_dir()
+        self.download_dirs = self._detect_download_dirs()
         self.driver = MarionetteDriver()
         self.proc: subprocess.Popen | None = None
         self.debug = debug
@@ -428,22 +440,30 @@ class ImageGenerator:
                 console.print(f"[dim warning]⚠ [DEBUG GAGAL TANGKAP LAYAR]: {err}[/dim warning]")
             return None
 
-    def _detect_download_dir(self) -> Path:
-        """Mendeteksi direktori unduhan peramban secara otomatis dengan prioritas D:\\Downloads.
+    @property
+    def download_dir(self) -> Path:
+        """Direktori unduhan utama untuk kompatibilitas mundur."""
+        return self.download_dirs[0]
+
+    def _detect_download_dirs(self) -> list[Path]:
+        """Mendeteksi semua direktori unduhan potensial peramban di Windows.
+
+        Memeriksa folder Downloads pengguna Windows, D:\\Downloads, dan direktori lokal workspace.
 
         Returns:
-            Path: Lokasi direktori unduhan yang valid dan siap digunakan.
+            list[Path]: Daftar direktori unduhan yang ada di sistem dan siap dipindai.
         """
         candidates = [
-            Path(r"D:\Downloads"),
             Path.home() / "Downloads",
+            Path(r"D:\Downloads"),
             self.workspace_dir / "downloads",
         ]
-        for c in candidates:
-            if c.exists():
-                return c
-        candidates[0].mkdir(parents=True, exist_ok=True)
-        return candidates[0]
+        dirs = [c for c in candidates if c.exists()]
+        if not dirs:
+            default_dir = Path.home() / "Downloads"
+            default_dir.mkdir(parents=True, exist_ok=True)
+            dirs.append(default_dir)
+        return dirs
 
     def _is_profile_locked(self) -> bool:
         """Memeriksa apakah profil Firefox sedang dikunci atau memiliki lock yatim (parent.lock).
@@ -595,17 +615,23 @@ class ImageGenerator:
         """
         login_script = """
         const url = window.location.href.toLowerCase();
-        // 1. Cek halaman landing /about atau tombol masuk
+        // 1. Cek apakah sudah di dashboard / kanvas project
+        const hasDashboard = !!document.querySelector('aisandbox-root, flow-project-shell, flow-prompt-box, .project-card');
+        if (hasDashboard && !url.includes('/about')) {
+            return { action: 'logged_in', url: url };
+        }
+
+        // 2. Cek halaman landing /about atau tombol masuk
         const actionBtn = Array.from(document.querySelectorAll('a, button')).find(el => {
             const t = (el.textContent || '').trim().toLowerCase();
-            return t.includes('buat dengan google flow') || t.includes('sign in') || t.includes('masuk');
+            return t.includes('buat dengan google flow') || t === 'sign in' || t === 'masuk' || t === 'log in';
         });
         if (actionBtn) {
             actionBtn.click();
             return { action: 'clicked_signin', url: url };
         }
 
-        // 2. Cek Google Account Chooser
+        // 3. Cek Google Account Chooser
         if (url.includes('accounts.google.com')) {
             const acc = document.querySelector('div[data-identifier], li[data-identifier], [data-email]');
             if (acc) {
@@ -614,9 +640,7 @@ class ImageGenerator:
             }
         }
 
-        // 3. Cek apakah sudah di dashboard / project
-        const hasDashboard = !!document.querySelector('aisandbox-root, flow-project-shell, .project-card, button[aria-label*="Project"]');
-        return { action: hasDashboard ? 'logged_in' : 'waiting', url: url };
+        return { action: 'waiting', url: url };
         """
         for _ in range(15):
             try:
@@ -662,7 +686,8 @@ class ImageGenerator:
             if isinstance(curr, dict) and curr.get("inside"):
                 norm_target = target_project_name.lower().replace("_", " ")
                 norm_curr = (curr.get("title") or "").replace("_", " ")
-                if norm_target in norm_curr or "image" in norm_curr:
+                if norm_target in norm_curr or "image" in norm_curr or not norm_curr:
+                    self.current_project_url = curr.get("url")
                     return True
         except Exception:
             pass
@@ -733,6 +758,10 @@ class ImageGenerator:
                 ready = self.driver.execute_script(wait_canvas_script)
                 if ready:
                     time.sleep(1.5)
+                    try:
+                        self.current_project_url = self.driver.execute_script("return window.location.href;")
+                    except Exception:
+                        pass
                     return True
             except Exception:
                 pass
@@ -740,21 +769,121 @@ class ImageGenerator:
 
         return opened
 
+    def dismiss_onboarding_dialog(self) -> bool:
+        """Menutup dialog modal onboarding atau persetujuan kebijakan privasi Google Flow secara mandiri.
+
+        Mendeteksi modal 'Gunakan dan kembangkan alat AI untuk kreativitas' atau 'Tinjau kebijakan privasi kami',
+        menggulirkan konten ke paling dasar, mencentang checkbox jika ada, dan mengeklik tombol aksi
+        seperti 'Berikutnya', 'Lanjutkan', 'Saya setuju', 'Mulai', atau 'Selesai' hingga modal tertutup.
+
+        Returns:
+            bool: True jika ada dialog yang berhasil ditutup atau jika tidak ada dialog yang menghalangi.
+        """
+        dismiss_script = """
+        const dialog = document.querySelector('mat-dialog-container, [role="dialog"], flow-onboarding, div[class*="dialog"]');
+        if (!dialog) return { hasDialog: false };
+
+        // Scroll semua elemen konten di dalam dialog agar tombol enabled
+        const scrollables = dialog.querySelectorAll('mat-dialog-content, div');
+        for (const s of scrollables) {
+            if (s.scrollHeight > s.clientHeight) {
+                s.scrollTop = s.scrollHeight;
+                s.dispatchEvent(new Event('scroll', { bubbles: true }));
+            }
+        }
+
+        // Cek checkbox jika ada yang belum tercentang
+        const checkboxes = Array.from(dialog.querySelectorAll('input[type="checkbox"], mat-checkbox'));
+        for (const cb of checkboxes) {
+            if (!cb.checked && !cb.classList.contains('mat-mdc-checkbox-checked')) {
+                cb.click();
+            }
+        }
+
+        // Cari tombol aksi utama di dalam dialog (abaikan Logout atau Batal)
+        const btns = Array.from(dialog.querySelectorAll('button'));
+        const primaryBtn = btns.find(b => {
+            const t = (b.textContent || '').trim().toLowerCase();
+            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+            const isDismissAction = t === 'berikutnya' || t === 'next' || t === 'lanjutkan' ||
+                                    t === 'continue' || t === 'saya setuju' || t === 'setuju' ||
+                                    t === 'mulai' || t === 'selesai' || t === 'i agree' ||
+                                    t.includes('berikutnya') || t.includes('lanjutkan') || t.includes('setuju');
+            const isNegative = t === 'logout' || t === 'batal' || t === 'cancel' || t === 'sebelumnya';
+            return isDismissAction && !isNegative && !b.disabled && b.getAttribute('aria-disabled') !== 'true';
+        });
+
+        if (primaryBtn) {
+            const btnText = primaryBtn.textContent.trim();
+            primaryBtn.click();
+            return { hasDialog: true, action: 'clicked', button: btnText };
+        }
+
+        return { hasDialog: true, action: 'waiting_scroll_or_enabled' };
+        """
+
+        closed_any = False
+        for cycle in range(1, 6):
+            try:
+                res = self.driver.execute_script(dismiss_script)
+                if isinstance(res, dict):
+                    if not res.get("hasDialog"):
+                        break
+                    closed_any = True
+                    btn_clicked = res.get("button", "Aksi")
+                    console.print(f"[info]ℹ[/info] Menutup modal onboarding Google Flow (Tahap {cycle}: mengeklik '{btn_clicked}')...")
+                    self.capture_debug_screenshot(f"dismiss_onboarding_step_{cycle}", f"Dismiss onboarding dialog tahap {cycle}")
+                    time.sleep(2.0)
+            except Exception:
+                pass
+            time.sleep(0.5)
+
+        return closed_any
+
+    def close_agent_panel_if_open(self) -> bool:
+        """Menutup sidebar panel 'Sesi' agen di sebelah kanan jika sedang terbuka.
+
+        Saat panel sesi agen terbuka, kanvas tengah tidak menampilkan kotak prompt utama.
+        Mengeklik tombol tutup ('Tutup' / icon close) akan memunculkan flow-prompt-box
+        di bagian tengah bawah kanvas utama.
+
+        Returns:
+            bool: True jika panel berhasil ditutup atau sudah dalam kondisi tertutup.
+        """
+        close_script = """
+        const closeBtn = document.querySelector('button[aria-label="Tutup"], button[aria-label*="Tutup sesi"], .page-layout header button.mdc-icon-button:last-child');
+        if (closeBtn && closeBtn.offsetParent !== null) {
+            closeBtn.click();
+            return { closed: true };
+        }
+        return { closed: false };
+        """
+        try:
+            res = self.driver.execute_script(close_script)
+            if isinstance(res, dict) and res.get("closed"):
+                console.print("[info]ℹ[/info] Panel sesi samping ditutup (beralih ke kanvas utama).")
+                time.sleep(1.5)
+                return True
+        except Exception:
+            pass
+        return False
+
     def disable_agent_mode(self) -> bool:
         """Menonaktifkan Mode Agen pada kotak prompt Google Flow jika sedang aktif.
 
-        Memeriksa atribut `aria-pressed` atau styling tombol chip 'Agen'. Jika aktif,
-        tombol tersebut diklik untuk beralih kembali ke mode pembuatan gambar standar.
+        Memeriksa atribut `aria-pressed` atau styling tombol chip 'Agen' (class `agent-mode-chip-checked`).
+        Jika aktif, tombol tersebut diklik untuk beralih kembali ke mode pembuatan gambar standar.
 
         Returns:
             bool: True jika mode agen non-aktif atau berhasil dimatikan.
         """
         toggle_script = """
-        const agentBtn = document.querySelector('button.agent-mode-chip') ||
+        const agentBtn = document.querySelector('button.agent-mode-chip, .agent-mode-chip') ||
                          Array.from(document.querySelectorAll('button')).find(el => (el.textContent || '').trim() === 'Agen');
         if (!agentBtn) return { status: 'not_found' };
 
         const isPressed = agentBtn.getAttribute('aria-pressed') === 'true' ||
+                          agentBtn.classList.contains('agent-mode-chip-checked') ||
                           agentBtn.classList.contains('active') ||
                           agentBtn.classList.contains('mat-mdc-button-checked');
 
@@ -767,8 +896,8 @@ class ImageGenerator:
         try:
             res = self.driver.execute_script(toggle_script)
             if isinstance(res, dict) and res.get("status") == "deactivated":
-                console.print("[info]ℹ[/info] Mode Agen dinonaktifkan (beralih ke mode standar).")
-                time.sleep(0.8)
+                console.print("[info]ℹ[/info] Mode Agen dinonaktifkan (beralih ke mode gambar standar).")
+                time.sleep(1.0)
                 return True
         except Exception:
             pass
@@ -923,14 +1052,26 @@ class ImageGenerator:
         # 1. Tangani login jika diperlukan
         self.handle_login_if_needed()
 
-        # 2. Masuk ke proyek 'images generator' atau buat baru
+        # 2. Tutup dialog modal onboarding jika muncul di beranda
+        self.dismiss_onboarding_dialog()
+
+        # 3. Masuk ke proyek 'images generator' atau buka kanvas proyek
         self.open_or_create_project(target_project_name="images generator")
 
-        # 3. Nonaktifkan mode agen jika sedang aktif
+        # 4. Tutup dialog modal onboarding jika muncul di kanvas proyek
+        self.dismiss_onboarding_dialog()
+
+        # 5. Tutup sidebar panel sesi agen jika terbuka agar prompt box kanvas aktif
+        self.close_agent_panel_if_open()
+
+        # 6. Nonaktifkan mode agen jika sedang aktif pada prompt box kanvas
         self.disable_agent_mode()
 
-        # 4. Konfigurasi setelan model ke Nano Banana Pro x1
+        # 7. Konfigurasi setelan model ke Nano Banana Pro (x1)
         self.configure_generation_settings(model_name="Nano Banana Pro", count_str="x1")
+
+        # 8. Bersihkan seluruh tile lama dari kanvas agar kanvas selalu kosong sebelum memulai
+        self.delete_all_canvas_tiles()
 
         return flow_handle
 
@@ -945,7 +1086,7 @@ class ImageGenerator:
             int: Jumlah tile gagal yang berhasil dibersihkan dari kanvas.
         """
         clean_script = """
-        const tiles = Array.from(document.querySelectorAll('flow-image-tile, flow-grid-tile-container'));
+        const tiles = Array.from(document.querySelectorAll('flow-image-tile'));
         let deleted = 0;
         for (const t of tiles) {
             const txt = (t.innerText || '').toLowerCase();
@@ -969,16 +1110,89 @@ class ImageGenerator:
         except Exception:
             return 0
 
+    def delete_all_canvas_tiles(self, max_tiles: int = 20) -> int:
+        """Menghapus SEMUA tile gambar (berhasil maupun gagal) dari kanvas Google Flow.
+
+        Menjamin kanvas proyek 100% bersih dan kosong sebelum gambar baru dibuat,
+        sesuai instruksi operasional mutlak agar tidak ada tile lama yang menumpuk.
+
+        Args:
+            max_tiles (int): Batas maksimal pembersihan tile per siklus (default: 20).
+
+        Returns:
+            int: Jumlah total tile yang berhasil dibersihkan dari kanvas.
+        """
+        deleted_count = 0
+        for _ in range(max_tiles):
+            # 1. Bersihkan tile gagal/error yang memiliki tombol hapus langsung
+            self.clean_failed_tiles()
+
+            # 2. Periksa apakah masih ada elemen tile pada kanvas
+            try:
+                tile_count = self.driver.execute_script("return document.querySelectorAll('flow-image-tile').length;")
+            except Exception:
+                tile_count = 0
+
+            if not tile_count or tile_count == 0:
+                break
+
+            # 3. Buka menu hotbar opsi pada tile pertama
+            open_script = """
+            const tile = document.querySelector('flow-image-tile');
+            if (!tile) return { success: false, reason: 'Tile tidak ditemukan' };
+            tile.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+            tile.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+
+            const btn = tile.querySelector('button[aria-label="Opsi lainnya"], flow-image-hotbar button:nth-child(3), flow-image-hotbar button:last-child');
+            if (!btn) return { success: false, reason: 'Tombol hotbar tidak ditemukan' };
+            btn.click();
+            return { success: true };
+            """
+            try:
+                res_open = self.driver.execute_script(open_script)
+                if not isinstance(res_open, dict) or not res_open.get("success"):
+                    time.sleep(0.5)
+                    continue
+            except Exception:
+                time.sleep(0.5)
+                continue
+
+            time.sleep(0.6)
+
+            # 4. Klik opsi 'Pindahkan ke sampah' pada overlay menu
+            trash_script = """
+            const items = Array.from(document.querySelectorAll('.cdk-overlay-container button.mat-mdc-menu-item, button.mat-mdc-menu-item'));
+            const trash = items.find(b => (b.textContent || '').includes('sampah') || (b.textContent || '').includes('Delete'));
+            if (trash) {
+                trash.click();
+                return true;
+            }
+            return false;
+            """
+            try:
+                res_trash = self.driver.execute_script(trash_script)
+                if res_trash:
+                    deleted_count += 1
+            except Exception:
+                pass
+
+            time.sleep(1.0)
+
+        if deleted_count > 0:
+            console.print(f"[dim info]ℹ Membersihkan kanvas: {deleted_count} tile lama dihapus.[/dim info]")
+        return deleted_count
+
     def submit_prompt(self, prompt_text: str) -> dict:
-        """Memasukkan teks prompt ke editor ProseMirror dan memicu tombol buat gambar secara senyap.
+        """Memasukkan teks prompt ke editor ProseMirror via native keystrokes dan memicu pembuatan gambar.
 
         Alur:
-        1. Membersihkan tile gagal sebelumnya jika ada di kanvas.
-        2. Mencatat snapshot kondisi kanvas saat ini (jumlah gambar & URL gambar teratas).
-        3. Memfokuskan editor ProseMirror (`flow-rich-text-editor div[contenteditable="true"]`).
-        4. Membersihkan teks lama, memasukkan teks prompt via DOM execCommand, dan memicu InputEvent.
-        5. Mengeklik tombol 'Mulai pembuatan' (`flow-generate-icon-button button`) melalui Gecko
-           native click tanpa menggerakkan kursor mouse pengguna.
+        1. Menutup overlay popup menu liar jika ada yang aktif.
+        2. Menghapus SEMUA tile lama dari kanvas agar bersih total sebelum render baru.
+        3. Mencatat snapshot awal kondisi kanvas (jumlah gambar & URL gambar teratas).
+        4. Mengosongkan teks lama di editor ProseMirror.
+        5. Mengirimkan pengetikan teks asli via Gecko C++ 'ElementSendKeys' sehingga Angular
+           seketika mendeteksi teks dan mengaktifkan tombol submit ('disabled: false').
+        6. Mengeklik tombol 'Mulai pembuatan' via Gecko C++ native click ('ElementClick').
 
         Args:
             prompt_text (str): Teks deskripsi gambar yang akan digenerate.
@@ -987,9 +1201,16 @@ class ImageGenerator:
             dict: Snapshot awal kanvas berisi `imgCount` (int) dan `firstImgSrc` (str | None).
 
         Raises:
-            RuntimeError: Jika elemen editor prompt tidak ditemukan pada halaman.
+            RuntimeError: Jika elemen editor prompt atau tombol submit tidak ditemukan.
         """
-        self.clean_failed_tiles()
+        # Tutup menu overlay liar jika ada
+        try:
+            self.driver.execute_script("document.querySelectorAll('.cdk-overlay-backdrop').forEach(el => el.click());")
+        except Exception:
+            pass
+
+        # Wajib bersihkan seluruh tile dari kanvas sebelum membuat gambar baru
+        self.delete_all_canvas_tiles()
 
         # Catat snapshot kondisi kanvas sebelum generasi baru dimulai
         snapshot_script = """
@@ -1001,65 +1222,62 @@ class ImageGenerator:
         """
         initial_state = self.driver.execute_script(snapshot_script) or {"imgCount": 0, "firstImgSrc": None}
 
-        input_script = """
-        const prompt = arguments[0];
+        # 1. Bersihkan editor ProseMirror
+        clear_script = """
         const editor = document.querySelector('.ProseMirror[contenteditable="true"]') ||
-                       document.querySelector('flow-rich-text-editor div[contenteditable="true"]') ||
-                       document.querySelector('flow-rich-text-editor p') ||
-                       document.querySelector('div[contenteditable="true"]');
-        if (!editor) return { success: false, error: 'Editor prompt tidak ditemukan.' };
-
+                       document.querySelector('flow-rich-text-editor div[contenteditable="true"]');
+        if (!editor) return false;
         editor.focus();
         document.execCommand('selectAll', false, null);
         document.execCommand('delete', false, null);
-        document.execCommand('insertText', false, prompt);
-        editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: prompt }));
-        editor.dispatchEvent(new Event('change', { bubbles: true }));
-
-        return { success: true };
+        return true;
         """
-        res_in = None
-        for _ in range(40):
-            res_in = self.driver.execute_script(input_script, [prompt_text])
-            if isinstance(res_in, dict) and res_in.get("success"):
-                break
+        cleared = False
+        for _ in range(20):
+            try:
+                cleared = self.driver.execute_script(clear_script)
+                if cleared:
+                    break
+            except Exception:
+                pass
             time.sleep(0.5)
 
-        if not isinstance(res_in, dict) or not res_in.get("success"):
-            raise RuntimeError(f"Gagal memasukkan teks prompt: {res_in}")
+        if not cleared:
+            raise RuntimeError("Elemen editor ProseMirror tidak ditemukan pada kanvas.")
+
+        time.sleep(0.3)
+
+        # 2. Temukan element ID editor dan ketikkan prompt via native ElementSendKeys
+        editor_id = self.driver.find_element("css selector", ".ProseMirror[contenteditable='true']")
+        self.driver.click_element(editor_id)
+        time.sleep(0.2)
 
         console.print(f"[info]ℹ[/info] Mengirim prompt: [cyan]{prompt_text}[/cyan]")
-        time.sleep(0.5)
+        self.driver.send_keys(editor_id, prompt_text)
+        time.sleep(0.8)
 
-        # Klik tombol generate via Gecko C++ native click / DOM click
-        click_btn_script = """
-        const candidates = [
-            'button.generate-icon-button',
-            'button[aria-label="Mulai pembuatan"]',
-            'button[type="submit"]',
-            'flow-generate-icon-button button',
-            'button.generate-button',
-            'button[aria-label="Kirim"]',
-            'button[aria-label="Generate"]',
-            'flow-prompt-box button.mat-mdc-icon-button:last-of-type',
-            'flow-prompt-box button:last-of-type'
-        ];
-        for (const sel of candidates) {
-            const btn = document.querySelector(sel);
-            if (btn && !btn.disabled) {
-                btn.click();
-                return { success: true, selector: sel };
-            }
-        }
-        // Fallback: picu event Enter pada editor
-        const editor = document.querySelector('.ProseMirror[contenteditable="true"], div[contenteditable="true"]');
-        if (editor) {
-            editor.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13 }));
-            return { success: true, method: 'enter_key' };
-        }
-        return { success: false };
-        """
-        self.driver.execute_script(click_btn_script)
+        # 3. Klik tombol submit (yang kini diaktifkan disabled: false oleh Angular)
+        btn_id = None
+        for sel in (
+            "flow-prompt-box button.generate-icon-button",
+            "button[aria-label='Mulai pembuatan']",
+            "flow-prompt-box button[type='submit']",
+        ):
+            try:
+                btn_id = self.driver.find_element("css selector", sel)
+                if btn_id:
+                    break
+            except Exception:
+                pass
+
+        if btn_id:
+            try:
+                self.driver.click_element(btn_id)
+            except Exception:
+                self.driver.execute_script("const b = document.querySelector('button[aria-label=\"Mulai pembuatan\"], button.generate-icon-button'); if (b) b.click();")
+        else:
+            # Fallback DOM click
+            self.driver.execute_script("const b = document.querySelector('button[aria-label=\"Mulai pembuatan\"], button.generate-icon-button'); if (b) b.click();")
 
         return initial_state
 
@@ -1123,7 +1341,7 @@ class ImageGenerator:
         if (firstTile) {
             firstTile.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
             firstTile.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
-            const hbBtn = firstTile.querySelector('flow-image-hotbar button:nth-child(3)');
+            const hbBtn = firstTile.querySelector('button[aria-label="Opsi lainnya"], flow-image-hotbar button:nth-child(3), flow-image-hotbar button:last-child');
             hotbarReady = !!hbBtn;
         }
 
@@ -1175,8 +1393,13 @@ class ImageGenerator:
                     time.sleep(1.0)
                     return True
 
-                # 3. Fallback jika hotbar siap setelah beberapa detik
+                # 3. Hotbar opsi siap diakses setelah beberapa detik
                 if is_new_image and not current_prog and st.get("hotbarReady") and (time.time() - start_time > 8):
+                    time.sleep(1.0)
+                    return True
+
+                # 4. Gambar selesai dibuat (persentase hilang, tile baru ada, dan bukan tile galat)
+                if is_new_image and not current_prog and (time.time() - start_time > 6):
                     time.sleep(1.0)
                     return True
 
@@ -1255,8 +1478,10 @@ class ImageGenerator:
     def wait_for_downloaded_file(self, existing_files: set[str], timeout: int = 60) -> Path:
         """Memantau folder unduhan sampai berkas gambar .jpg baru selesai diunduh secara utuh.
 
-        Memastikan berkas unduhan bukan bagian dari daftar berkas lama (`existing_files`),
-        tidak memiliki ekstensi unduhan sementara (`.part`), dan ukuran berkasnya stabil (> 0 bytes).
+        Memindai seluruh direktori unduhan yang valid di sistem (Downloads pengguna Windows,
+        D:\\Downloads, dan direktori lokal workspace) untuk mendeteksi berkas baru,
+        memastikan berkas bukan bagian dari berkas lama (`existing_files`), tidak berekstensi `.part`,
+        dan ukuran berkasnya stabil (> 0 bytes).
 
         Args:
             existing_files (set[str]): Kumpulan path absolut berkas gambar yang sudah ada sebelum unduhan dipicu.
@@ -1270,13 +1495,17 @@ class ImageGenerator:
         """
         start_time = time.time()
         while time.time() - start_time < timeout:
-            current_files = list(self.download_dir.glob("*.jpg")) + list(self.download_dir.glob("*.jpeg"))
-            new_files = [f for f in current_files if str(f.resolve()) not in existing_files]
+            all_current_files = []
+            for d in self.download_dirs:
+                if d.exists():
+                    all_current_files.extend(list(d.glob("*.jpg")) + list(d.glob("*.jpeg")))
+
+            new_files = [f for f in all_current_files if str(f.resolve()) not in existing_files]
 
             if new_files:
                 latest_file = max(new_files, key=lambda f: f.stat().st_mtime)
 
-                part_files = list(self.download_dir.glob(f"{latest_file.name}.part"))
+                part_files = list(latest_file.parent.glob(f"{latest_file.name}.part"))
                 if not part_files:
                     size1 = latest_file.stat().st_size
                     time.sleep(0.5)
@@ -1286,50 +1515,21 @@ class ImageGenerator:
 
             time.sleep(1.0)
 
-        raise TimeoutError(f"File .jpg hasil unduhan tidak terdeteksi di {self.download_dir} dalam {timeout} detik.")
+        dirs_str = ", ".join(str(d) for d in self.download_dirs)
+        raise TimeoutError(f"File .jpg hasil unduhan tidak terdeteksi di [{dirs_str}] dalam {timeout} detik.")
 
     def delete_current_tile(self, timeout: int = 15) -> bool:
-        """Menghapus gambar yang baru digenerate dari kanvas Google Flow ('Pindahkan ke sampah').
+        """Menghapus seluruh tile dari kanvas Google Flow ('Pindahkan ke sampah').
 
-        Membuka menu hotbar pada tile teratas dan mengeklik opsi 'Pindahkan ke sampah'
-        secara otomatis tanpa konfirmasi dialog, sehingga kanvas proyek tetap bersih
-        dan tidak menumpuk riwayat gambar yang tidak terpakai.
+        Menjamin kanvas proyek selalu bersih total tanpa ada gambar lama yang menumpuk.
 
         Args:
             timeout (int): Batas waktu operasi penghapusan dalam detik (default: 15).
 
         Returns:
-            bool: True jika perintah pemindahan ke sampah berhasil dieksekusi.
-
-        Raises:
-            RuntimeError: Jika opsi 'Pindahkan ke sampah' tidak ditemukan pada menu.
+            bool: True jika proses pembersihan selesai.
         """
-        # 1. Buka hotbar button 3
-        open_script = """
-        const tile = document.querySelector('flow-image-tile');
-        if (!tile) return { success: false, error: 'Tile tidak ditemukan untuk dihapus.' };
-
-        tile.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
-        tile.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
-
-        const btn = tile.querySelector('flow-image-hotbar button:nth-child(3)');
-        if (btn) btn.click();
-        return { success: true };
-        """
-        self.driver.execute_script(open_script)
-        time.sleep(1.0)
-
-        # 2. Klik opsi 'Pindahkan ke sampah' pada overlay
-        trash_script = """
-        const buttons = Array.from(document.querySelectorAll('.cdk-overlay-container button.mat-mdc-menu-item, button.mat-mdc-menu-item'));
-        const trash = buttons.find(b => (b.textContent || '').includes('sampah') || (b.textContent || '').includes('Delete'));
-        if (!trash) return { success: false, error: 'Opsi Pindahkan ke sampah tidak ditemukan.' };
-
-        trash.click();
-        return { success: true };
-        """
-        self.driver.execute_script(trash_script)
-        time.sleep(1.5)
+        self.delete_all_canvas_tiles()
         return True
 
     def close(self) -> None:
@@ -1444,13 +1644,14 @@ def generate_image(
                 )
 
             try:
-                # Bersihkan sisa tile gagal sebelumnya jika ada di kanvas
-                generator.clean_failed_tiles()
+                # Bersihkan SELURUH tile di kanvas agar kanvas selalu kosong sebelum generasi baru
+                generator.delete_all_canvas_tiles()
 
                 # Segarkan halaman jika beberapa kali percobaan berturut-turut gagal
                 if attempt > 1 and attempt % 4 == 0:
                     try:
-                        generator.driver.navigate(FLOW_PROJECT_URL)
+                        nav_url = getattr(generator, "current_project_url", None) or FLOW_PROJECT_URL
+                        generator.driver.navigate(nav_url)
                         time.sleep(3.5)
                         generator.find_flow_tab()
                         generator.capture_debug_screenshot(
@@ -1460,10 +1661,11 @@ def generate_image(
                     except Exception:
                         pass
 
-                existing = {
-                    str(f.resolve())
-                    for f in list(generator.download_dir.glob("*.jpg")) + list(generator.download_dir.glob("*.jpeg"))
-                }
+                existing = set()
+                for d in generator.download_dirs:
+                    if d.exists():
+                        for f in list(d.glob("*.jpg")) + list(d.glob("*.jpeg")):
+                            existing.add(str(f.resolve()))
                 initial_state = generator.submit_prompt(prompt)
                 generator.capture_debug_screenshot(
                     f"prompt_submitted_att_{attempt}",
@@ -1519,7 +1721,7 @@ def generate_image(
                     f"failure_state_att_{attempt}",
                     f"Visual kegagalan (Percobaan ke-{attempt}): {attempt_err}",
                 )
-                generator.clean_failed_tiles()
+                generator.delete_all_canvas_tiles()
                 retry_tag = f"Percobaan ke-{attempt}" if max_retries is None else f"Percobaan {attempt}/{max_retries}"
                 console.print(
                     f"[warning]⚠ {retry_tag} terdeteksi gagal ({attempt_err}). "
@@ -1689,7 +1891,8 @@ def main() -> int:
 
             while not success:
                 try:
-                    generator.clean_failed_tiles()
+                    # Bersihkan SELURUH tile di kanvas agar kanvas selalu kosong sebelum generasi baru
+                    generator.delete_all_canvas_tiles()
 
                     # Segarkan halaman jika beberapa kali percobaan berturut-turut gagal
                     if attempt > 1 and attempt % 4 == 0:
@@ -1698,7 +1901,8 @@ def main() -> int:
                             description=f"[cyan]Menyegarkan halaman Google Flow (Percobaan ke-{attempt})...[/cyan]",
                         )
                         try:
-                            generator.driver.navigate(FLOW_PROJECT_URL)
+                            nav_url = getattr(generator, "current_project_url", None) or FLOW_PROJECT_URL
+                            generator.driver.navigate(nav_url)
                             time.sleep(3.5)
                             generator.find_flow_tab()
                             generator.capture_debug_screenshot(
@@ -1708,10 +1912,11 @@ def main() -> int:
                         except Exception:
                             pass
 
-                    existing = {
-                        str(f.resolve())
-                        for f in list(generator.download_dir.glob("*.jpg")) + list(generator.download_dir.glob("*.jpeg"))
-                    }
+                    existing = set()
+                    for d in generator.download_dirs:
+                        if d.exists():
+                            for f in list(d.glob("*.jpg")) + list(d.glob("*.jpeg")):
+                                existing.add(str(f.resolve()))
 
                     if attempt > 1:
                         progress.update(
@@ -1790,7 +1995,7 @@ def main() -> int:
                         f"failure_state_att_{attempt}",
                         f"Visual kegagalan (Percobaan ke-{attempt}): {attempt_err}",
                     )
-                    generator.clean_failed_tiles()
+                    generator.delete_all_canvas_tiles()
                     progress.update(
                         task,
                         description=f"[warning]⚠ Percobaan ke-{attempt} gagal ({attempt_err}). Menunggu cooldown {retry_delay:.0f}s sebelum mencoba ulang...[/warning]",
