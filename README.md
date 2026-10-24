@@ -1,26 +1,56 @@
 # Google Flow Image Generator 🎨🚀
 
-> **Autonomous AI Image Generator with Native Headless Gecko Engine, Stealth Bypass, and Full Studio Settings.**  
+> **Autonomous AI Image Generator Client for Google Flow — Connected to Browser Engine Repo.**  
 > *100% Gratis, Tanpa Kuota Berbayar, Tanpa Mengganggu Kursor Pengguna (Zero Cursor Hijacking).*
 
 ---
 
-## 🌟 Fitur Unggulan
+## 🌟 Arsitektur Ekosistem 2 Repositori
 
-- 💎 **100% Free & Unlimited:** Memanfaatkan platform Google Flow tanpa memerlukan langganan API berbayar atau kuota kredit.
-- 🥷 **Silent Background & Zero Cursor Hijacking:** Berjalan 100% di latar belakang menggunakan mode `-headless` native Gecko via soket Marionette. Anda bebas mengetik, bekerja, atau bermain game tanpa kursor mouse terganggu.
-- 📐 **Setelan Aspek Rasio Lengkap:** Mendukung 5 rasio native Google Flow:
-  - `16:9` Widescreen Cinematic (`1376 × 768` px)
-  - `4:3` Klasik / Standard Landscape (`1152 × 896` px)
-  - `1:1` Square Persegi (`1024 × 1024` px)
-  - `3:4` Dokumen / Formal Portrait (`896 × 1152` px)
-  - `9:16` Smartphone Vertical / Shorts / Reels / TikTok (`768 × 1376` px)
-- 🧠 **Multi-Model AI Selection:** Pilih model engine: `pro` (Nano Banana Pro), `lite` (Nano Banana 2 Lite), atau `2.1` (Nano Banana 2.1).
-- 🔢 **Variasi Gambar Fleksibel:** Menghasilkan 1 hingga 4 variasi gambar per eksekusi (`x1`, `x2`, `x3`, `x4`).
-- 🛡️ **Self-Healing & Auto-Retry Cerdas:** Mendeteksi kendala jaringan, server error, atau status batas penggunaan harian secara otomatis. Melakukan pembersihan kanvas (*clean slate*), cooldown, dan perulangan mandiri hingga gambar berhasil diunduh.
-- 🧹 **Pembersihan Kanvas Otomatis:** Setelah gambar 1K berhasil disimpan ke direktori lokal, tile kanvas langsung dihapus (*Pindahkan ke sampah*) agar ruang kerja proyek tetap bersih dan ringan.
-- 💻 **Antarmuka Terminal Modern:** Ditenagai oleh Rich Terminal UI lengkap dengan progress spinner, tabel konfigurasi, panel ringkasan, dan menu `--help` yang interaktif.
-- 🔌 **Layanan Modul Python Kelas Perusahaan:** Dapat diimpor langsung (`from image_generator import generate, generate_image`) dengan type hints lengkap dan metadata keluaran `GenerationResult`.
+Repositori ini dirancang khusus sebagai **klien generator gambar cerdas** yang terhubung secara modular dengan **Repositori Browser (Browser Engine Repo)**:
+
+```mermaid
+graph LR
+    subgraph Repo 1: Browser Engine Repo
+        B[Firefox Portable Environment]
+        P[Isolated Profile & Google Login]
+        S[Native Gecko Marionette Port 2828]
+    end
+
+    subgraph Repo 2: Image Generator Repo [Repo Ini]
+        IG[image_generator.py / run.bat]
+        M[Multi-Model & Multi-Ratio Engine]
+        O[Auto-Download 1K & Canvas Cleaner]
+    end
+
+    S <-->|Soket TCP 127.0.0.1:2828| IG
+    IG -->|Hasil Gambar Resolusi 1K| O
+```
+
+1. **Repo 1 — Browser Engine Repo:**  
+   Menyiapkan peramban Firefox Portable, memelihara sesi profil Google yang terisolasi, mengonfigurasi WebExtension stealth anti-deteksi bot, serta membuka port otomasi Marionette (`127.0.0.1:2828`).
+2. **Repo 2 — Image Generator Repo (Repo Ini):**  
+   Klien otomasi mandiri tanpa dependensi browser berat. Bertugas mengeksekusi teks prompt, memilih setelan model AI dan aspek rasio, memantau progres pembuatan gambar hingga selesai, mengunduh berkas resolusi asli 1K, dan membersihkan kanvas secara otomatis.
+
+---
+
+## ✨ Fitur Utama
+
+- 💎 **100% Free & Unlimited:** Memanfaatkan Google Flow tanpa memerlukan kunci API berbayar atau langganan kuota.
+- 🥷 **Silent Background & Zero Cursor Hijacking:** Beroperasi di latar belakang menggunakan komunikasi soket native Marionette murni. Anda bebas mengetik, bekerja, atau bermain game tanpa kursor mouse terganggu.
+- 🔌 **Koneksi Modular ke Repo Browser:** Cukup pastikan peramban dari Repo Browser aktif mendengarkan port 2828, generator gambar akan langsung terhubung secara instan.
+- 📐 **Setelan Aspek Rasio Lengkap:**
+  - `16:9` Widescreen Cinematic (`1376 × 768` px) — Thumbnail YouTube, Wallpaper.
+  - `4:3` Klasik Landscape (`1152 × 896` px) — Presentasi, Layar Klasik.
+  - `1:1` Square Persegi (`1024 × 1024` px) — Feed Instagram, Avatar, Logo.
+  - `3:4` Formal Portrait (`896 × 1152` px) — Foto Profil, Portofolio.
+  - `9:16` Smartphone Fullscreen (`768 × 1376` px) — TikTok, Shorts, Reels, Stories.
+- 🧠 **Pilihan Model AI:** `pro` (Nano Banana Pro), `lite` (Nano Banana 2 Lite), dan `2.1` (Nano Banana 2.1).
+- 🔢 **Variasi Gambar Fleksibel:** Menghasilkan 1 hingga 4 gambar per eksekusi (`x1`, `x2`, `x3`, `x4`).
+- 🛡️ **Self-Healing & Auto-Retry Cerdas:** Mendeteksi status batas penggunaan atau kegagalan render, membersihkan kanvas (*clean slate*), dan mengulang proses secara mandiri hingga berhasil.
+- 🧹 **Pembersihan Kanvas Otomatis:** Menghapus tile dari kanvas Google Flow (*Pindahkan ke sampah*) setelah gambar berhasil disimpan ke direktori lokal.
+- 💻 **Antarmuka Terminal Modern:** Ditenagai Rich UI lengkap dengan progress spinner, tabel parameter, panel ringkasan, dan menu bantuan `--help`.
+- 📦 **API Modul Python:** Dapat diimpor langsung (`from image_generator import generate, generate_image`) dengan type hints lengkap dan metadata `GenerationResult`.
 
 ---
 
@@ -28,113 +58,102 @@
 
 ```text
 Image Generator/
-├── .agents/                    # Konfigurasi memori & tata kelola agen AI
-├── browser_profile/            # Direktori profil Firefox Portable terisolasi (diabaikan Git)
-├── debug/                      # Direktori tangkapan layar saat mode --debug aktif
+├── debug/                      # Direktori dokumentasi saat flag --debug aktif
 │   └── .gitkeep
-├── outputs/                    # Direktori penyimpanan hasil gambar yang diunduh
+├── outputs/                    # Direktori penyimpanan hasil unduhan gambar (1K)
 │   └── .gitkeep
-├── stealth_addon/              # Native WebExtension Stealth Bridge (bypass deteksi bot)
-│   ├── manifest.json           # Manifest WebExtension V2
-│   └── stealth.js              # Injeksi exportFunction/cloneInto Navigator.prototype
 ├── image_generator.py          # Modul inti Python & CLI Generator Gambar v1.0
-├── setup_browser.py            # CLI bootstrapper & pengelola login akun Google
 ├── run.bat                     # Runner batch Windows (klik ganda atau CLI)
-├── requirements.txt            # Dependensi pustaka Python resmi
+├── requirements.txt            # Dependensi pustaka Python minimal (rich, Pillow)
 ├── LICENSE                     # Lisensi open-source MIT
-├── .gitignore                  # Konfigurasi proteksi privasi profil & artefak
+├── .gitignore                  # Proteksi berkas lokal, cache, & direktori output
 └── README.md                   # Dokumentasi resmi proyek
 ```
 
 ---
 
-## 🚀 Panduan Memulai Cepat (Quick Start)
+## 🚀 Panduan Memulai & Menghubungkan
 
-### 1. Prasyarat Sistem
-- **Sistem Operasi:** Windows 10/11 (64-bit).
-- **Python:** Versi 3.10 atau yang lebih baru.
-- **Mozilla Firefox Portable:** Diunduh dan dikonfigurasi secara otomatis oleh skrip.
+### 1. Prasyarat & Koneksi ke Repo Browser
+1. Jalankan peramban dari **Repo Browser** Anda dengan port Marionette aktif (`127.0.0.1:2828`).
+2. Pastikan akun Google Anda telah login dan dapat membuka layanan [Google Flow](https://labs.google/fx/tools/flow).
+
+> **Tips:** Jika peramban belum berjalan, skrip ini dapat meluncurkan Firefox Portable secara otomatis jika terdeteksi di lokasi standar (`D:\FirefoxPortable\App\Firefox64\firefox.exe`) atau melalui environment variable:
+> - `FIREFOX_BIN`: Jalur ke berkas executable `firefox.exe`.
+> - `BROWSER_PROFILE`: Jalur ke folder profil browser terisolasi.
 
 ### 2. Instalasi Dependensi
-Buka terminal (Command Prompt / PowerShell) di folder proyek, lalu jalankan:
+Buka terminal pada folder proyek ini, lalu pasang dependensi:
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-### 3. Setup Browser & Login Akun Google (Sekali Saja)
-Sebelum menjalankan generasi pertama kali, masuk (*login*) ke akun Google Anda pada profil peramban terisolasi:
-
-```powershell
-python setup_browser.py --login
-```
-Peramban Firefox Portable akan terbuka. Silakan login ke akun Google Anda dan pastikan dapat membuka layanan [Google Flow](https://labs.google/fx/tools/flow). Setelah selesai, tutup jendela peramban. Profil dan sesi tersimpan aman secara lokal di folder `browser_profile/` (otomatis diabaikan oleh Git).
-
 ---
 
 ## 🎯 Cara Penggunaan
 
-Tersedia 3 cara pemanfaatan sesuai kebutuhan Anda:
+Tersedia 3 metode fleksibel sesuai kebutuhan Anda:
 
-### Lini 1: Runner Windows (`run.bat`)
-Cara termudah bagi pengguna desktop:
-1. **Klik ganda (*Double Click*)** berkas [run.bat](file:///d:/Documents/Image%20Generator/run.bat).
-2. Masukkan teks prompt ketika diminta pada antarmuka terminal.
-3. Generator akan bekerja secara otomatis di latar belakang dan menyimpan gambar ke folder `outputs/`.
+### Metode 1: Runner Windows (`run.bat`)
+Paling praktis untuk pengguna desktop Windows:
+- **Klik ganda (*Double Click*)** berkas [run.bat](file:///d:/Documents/Image%20Generator/run.bat).
+- Masukkan teks prompt ketika diminta pada antarmuka terminal.
+- Skrip akan memproses pembuatan gambar di latar belakang dan menyimpannya di folder `outputs/`.
 
-Atau jalankan `run.bat` melalui terminal dengan argumen langsung:
+Atau jalankan via PowerShell / Command Prompt dengan argumen langsung:
 ```powershell
 .\run.bat -p "lukisan cat minyak pemandangan pegunungan fajar" -a 16:9 -m pro
 ```
 
 ---
 
-### Lini 2: Baris Perintah Terminal (CLI)
+### Metode 2: Baris Perintah Terminal (CLI)
 
-Gunakan perintah `python image_generator.py` dengan opsi fleksibel:
+Gunakan perintah `python image_generator.py` dengan opsi lengkap:
 
 ```powershell
-# 1. Bantuan Lengkap (Help Menu)
+# 1. Menampilkan Menu Bantuan Interaktif
 python image_generator.py --help
 
-# 2. Generasi Standar (Nano Banana Pro, Rasio 16:9, Variasi 1)
-python image_generator.py -p "kucing putih berbulu lebat di taman bunga sakura"
+# 2. Generasi Gambar Standar (Nano Banana Pro, Rasio 16:9, Variasi 1)
+python image_generator.py -p "kucing putih anggora bermain di taman bunga sakura"
 
 # 3. Kustomisasi Aspek Rasio (16:9, 1:1, 9:16, 4:3, 3:4)
-python image_generator.py -p "cangkir kopi latte art bunga teratai" -a 1:1
+python image_generator.py -p "cangkir kopi hangat latte art teratai" -a 1:1
 
 # 4. Kustomisasi Model AI (pro, lite, 2.1)
-python image_generator.py -p "mobil sport futuristik di kota neon cyberpunk" -m pro -a 16:9
+python image_generator.py -p "mobil balap futuristik di sirkuit neon" -m pro -a 16:9
 
-# 5. Kustomisasi Variasi Gambar (1 sampai 4)
-python image_generator.py -p "kastil fantasi di atas awan senja" -c 2
+# 5. Kustomisasi Jumlah Variasi (1 sampai 4)
+python image_generator.py -p "kastil fantasi megah di atas tebing bersalju" -c 2
 
-# 6. Menentukan Folder / Nama File Tujuan (-o / --output)
-python image_generator.py -p "astronot menjelajahi gua kristal mars" -o "outputs/mars_hero.jpg"
+# 6. Menentukan Folder atau Nama File Tujuan (-o / --output)
+python image_generator.py -p "astronot menjelajahi gua kristal mars" -o "outputs/mars.jpg"
 
-# 7. Mode Debug (Menyimpan tangkapan layar setiap fase ke folder debug/)
-python image_generator.py -p "potret close-up burung merak emas" --debug
+# 7. Mode Debug (Menyimpan tangkapan layar setiap langkah ke folder debug/)
+python image_generator.py -p "burung merak bulu kristal bersinar" --debug
 ```
 
 #### Tabel Opsi CLI
 
 | Opsi Singkat | Opsi Panjang | Nilai Default | Deskripsi |
 | :--- | :--- | :--- | :--- |
-| `-p` | `--prompt` | *None* (Interaktif) | Teks prompt gambar (Bahasa Indonesia / Inggris) |
+| `-p` | `--prompt` | *None* (Interaktif) | Teks prompt gambar |
 | `-m` | `--model` | `pro` | Pilihan model: `pro` (Banana Pro), `lite` (Banana 2 Lite), `2.1` |
 | `-a` | `--aspect-ratio`| `16:9` | Pilihan rasio: `16:9`, `4:3`, `1:1`, `3:4`, `9:16` |
 | `-c` | `--count` | `1` | Jumlah variasi gambar: `1`, `2`, `3`, atau `4` |
 | `-o` | `--output` | `outputs/` | Direktori atau nama berkas tujuan penyimpanan |
 | `-t` | `--timeout` | `180` | Batas waktu tunggu render per percobaan (detik) |
-| | `--headless` | `True` | Berjalan di latar belakang (gunakan `--no-headless` untuk melihat GUI) |
+| | `--headless` | `True` | Berjalan di latar belakang tanpa jendela GUI |
 | | `--debug` | `False` | Simpan visual audit setiap langkah ke folder `debug/` |
 | `-h` | `--help` | | Menampilkan antarmuka bantuan Rich lengkap |
 
 ---
 
-### Lini 3: Modul Python (*Callable API*)
+### Metode 3: Modul Python (*Callable API*)
 
-Modul [image_generator.py](file:///d:/Documents/Image%20Generator/image_generator.py) dapat diimpor langsung ke dalam proyek Python Anda:
+Impor langsung ke dalam proyek Python Anda:
 
 ```python
 from image_generator import generate, generate_image
@@ -184,14 +203,6 @@ else:
 
 ---
 
-## 🛠️ Keamanan & Privasi
-
-1. **Isolasi Profil Browser:** Seluruh kredensial akun, cookies, dan token otentikasi disimpan di dalam folder lokal `browser_profile/` dan secara tegas dikecualikan oleh [.gitignore](file:///d:/Documents/Image%20Generator/.gitignore).
-2. **Kedaulatan Git:** Repositori ini tidak akan pernah menyertakan kredensial rahasia atau berkas riwayat sesi pribadi Anda.
-3. **Tanpa Telemetri Pihak Ketiga:** Tidak ada pengiriman data ke server luar selain komunikasi langsung ke domain resmi Google.
-
----
-
 ## 📄 Lisensi
 
-Proyek ini dilisensikan di bawah lisensi open-source [MIT License](file:///d:/Documents/Image%20Generator/LICENSE). Bebas digunakan, dimodifikasi, dan didistribusikan untuk keperluan pribadi maupun komersial.
+Proyek ini dilisensikan di bawah lisensi open-source [MIT License](file:///d:/Documents/Image%20Generator/LICENSE).

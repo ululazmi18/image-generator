@@ -79,3 +79,10 @@
   - [x] Penulisan ulang `README.md` komprehensif berstandar kelas dunia (3 lini penggunaan: batch runner, CLI, Python module)
   - [x] Verifikasi zero-error py_compile dan Rich `--help` interface
 
+- [x] Pemisahan Repositori Image Generator (Decoupling dari Repo Browser)
+  - [x] Hapus modul setup peramban bawaan (`setup_browser.py` dan `stealth_addon/`) dari repo ini karena telah dideploy di Repo Browser
+  - [x] Rampingkan `requirements.txt` khusus Image Generator (`rich`, `Pillow`)
+  - [x] Tingkatkan `image_generator.py` untuk mendeteksi sesi peramban aktif dari Repo Browser via port Marionette (127.0.0.1:2828), environment variable, atau path tetangga
+  - [x] Perbarui `README.md` dengan arsitektur ekosistem 2 repositori dan diagram koneksi ke Repo Browser
+
+

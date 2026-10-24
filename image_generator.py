@@ -622,8 +622,34 @@ class ImageGenerator:
         self.aspect_ratio = normalize_aspect_ratio(aspect_ratio)
         self.count_str = normalize_count(count)
 
-        self.profile_dir = self.workspace_dir / "browser_profile"
-        self.ff_bin = Path(r"D:\FirefoxPortable\App\Firefox64\firefox.exe")
+        # Deteksi profil peramban (lokal, environment variable, atau dari repo browser tetangga)
+        custom_profile = os.environ.get("BROWSER_PROFILE")
+        if custom_profile:
+            self.profile_dir = Path(custom_profile).resolve()
+        else:
+            local_profile = self.workspace_dir / "browser_profile"
+            neighbor_profiles = [
+                local_profile,
+                self.workspace_dir.parent / "browser" / "browser_profile",
+                self.workspace_dir.parent / "browser_profile",
+                Path(r"D:\FirefoxPortable\Data\profile"),
+            ]
+            self.profile_dir = next((p for p in neighbor_profiles if p.exists()), local_profile)
+
+        # Deteksi binary Firefox Portable (lokal, environment variable, atau repo browser)
+        custom_bin = os.environ.get("FIREFOX_BIN")
+        if custom_bin:
+            self.ff_bin = Path(custom_bin).resolve()
+        else:
+            default_ff = Path(r"D:\FirefoxPortable\App\Firefox64\firefox.exe")
+            neighbor_bins = [
+                default_ff,
+                self.workspace_dir.parent / "browser" / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
+                self.workspace_dir.parent / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
+                self.workspace_dir / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
+            ]
+            self.ff_bin = next((b for b in neighbor_bins if b.exists()), default_ff)
+
         self.download_dirs = self._detect_download_dirs()
         self.driver = MarionetteDriver()
         self.proc: subprocess.Popen | None = None
@@ -718,6 +744,9 @@ class ImageGenerator:
         Mengatur `dom.webdriver.enabled = false` agar variabel `navigator.webdriver` bernilai
         `undefined` pada halaman web, serta mengaktifkan port Marionette permanen (2828).
         """
+        if not self.profile_dir.exists():
+            return
+
         user_js = self.profile_dir / "user.js"
         required_prefs = [
             'user_pref("marionette.enabled", true);',
@@ -736,14 +765,18 @@ class ImageGenerator:
 
         missing = [p for p in required_prefs if p not in existing]
         if missing:
-            with open(user_js, "a", encoding="utf-8") as f:
-                f.write("\n" + "\n".join(missing) + "\n")
+            try:
+                with open(user_js, "a", encoding="utf-8") as f:
+                    f.write("\n" + "\n".join(missing) + "\n")
+            except Exception:
+                pass
 
     def ensure_browser(self, auto_launch: bool = True) -> None:
-        """Memastikan Firefox berjalan dalam mode native headless dan mendengarkan port otomasi 2828.
+        """Memastikan peramban Firefox berjalan dan mendengarkan port otomasi Marionette (2828).
 
-        Jika peramban belum aktif dan auto_launch=True, peramban akan diluncurkan secara
-        permanen dalam mode -headless murni tanpa jendela grafis sama sekali di latar belakang.
+        Jika peramban sudah berjalan dari Repo Browser (port 2828 terbuka), metode ini
+        akan langsung menggunakan sesi peramban tersebut tanpa gangguan.
+        Jika belum berjalan, metode ini akan mencoba meluncurkannya secara otomatis di latar belakang.
 
         Args:
             auto_launch (bool): Luncurkan peramban secara otomatis jika belum berjalan (default: True).
@@ -753,8 +786,28 @@ class ImageGenerator:
         """
         self._ensure_stealth_preferences()
 
+        # 1. Cek apakah port otomasi Marionette (2828) sudah aktif dari Repo Browser
         if self.driver.is_port_open(timeout=0.8):
             return
+
+        # 2. Jika belum aktif, periksa apakah executable Firefox tersedia untuk diluncurkan otomatis
+        if not self.ff_bin.exists():
+            console.print(
+                Panel(
+                    "[bold yellow]Port otomasi Marionette (127.0.0.1:2828) belum aktif.[/bold yellow]\n\n"
+                    "Repositori [brand]Image Generator[/brand] ini beroperasi sebagai klien generasi gambar yang terkoneksi ke [cyan]Repo Browser[/cyan].\n\n"
+                    "[bold white]Petunjuk Menghubungkan:[/bold white]\n"
+                    "1. Buka dan jalankan peramban dari repositori browser Anda (dengan port Marionette 2828 aktif).\n"
+                    "2. Atau atur variabel lingkungan [cyan]FIREFOX_BIN[/cyan] ke lokasi firefox.exe dan [cyan]BROWSER_PROFILE[/cyan] ke folder profil Anda.\n"
+                    "3. Jalankan kembali perintah ini.",
+                    title="[gold]Menunggu Koneksi Repo Browser[/gold]",
+                    box=box.ROUNDED,
+                )
+            )
+            raise RuntimeError(
+                "Port otomasi peramban (2828) belum aktif. "
+                "Silakan jalankan peramban dari repo browser terlebih dahulu."
+            )
 
         if self._is_profile_locked():
             console.print(
@@ -792,7 +845,10 @@ class ImageGenerator:
                     break
 
             if not opened:
-                raise RuntimeError("Gagal terhubung ke port otomasi peramban (2828).")
+                raise RuntimeError(
+                    "Gagal terhubung ke port otomasi peramban (2828). "
+                    "Pastikan peramban dari repo browser berjalan dan mendengarkan port 2828."
+                )
 
     def connect(self) -> None:
         """Menghubungkan klien soket Marionette ke peramban Firefox."""

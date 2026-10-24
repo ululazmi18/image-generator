@@ -2,8 +2,7 @@
 # DEPENDENCIES — GOOGLE FLOW IMAGE GENERATOR
 # ==============================================================================
 # Modul ini beroperasi menggunakan 100% Native Marionette Socket Protocol
-# tanpa Selenium, Playwright, atau Webdriver eksternal.
+# yang terkoneksi langsung ke Repo Browser tanpa Selenium atau Webdriver pihak ketiga.
 
 rich>=13.0.0
 Pillow>=9.0.0
-requests>=2.28.0
