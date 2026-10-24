@@ -24,3 +24,4 @@ tmp/
 # Test Artifacts & Screenshots
 screenshots/
 outputs/
+debug/

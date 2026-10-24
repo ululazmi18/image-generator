@@ -345,12 +345,13 @@ class ImageGenerator:
         driver (MarionetteDriver): Klien soket Marionette internal.
     """
 
-    def __init__(self, workspace_dir: Path | None = None):
+    def __init__(self, workspace_dir: Path | None = None, debug: bool = False):
         """Menginisialisasi konfigurasi pengontrol ImageGenerator.
 
         Args:
             workspace_dir (Path | None): Direktori workspace root. Jika None, otomatis
                                          menggunakan direktori tempat skrip ini berada.
+            debug (bool): Mengaktifkan mode debug dengan dokumentasi tangkapan layar visual (default: False).
         """
         if workspace_dir is None:
             self.workspace_dir = Path(__file__).resolve().parent
@@ -362,6 +363,40 @@ class ImageGenerator:
         self.download_dir = self._detect_download_dir()
         self.driver = MarionetteDriver()
         self.proc: subprocess.Popen | None = None
+        self.debug = debug
+        self.debug_dir = self.workspace_dir / "debug"
+        if self.debug:
+            self.debug_dir.mkdir(parents=True, exist_ok=True)
+
+    def capture_debug_screenshot(self, step_name: str, description: str = "") -> Path | None:
+        """Mengambil tangkapan layar viewport peramban untuk dokumentasi visual saat mode debug aktif.
+
+        Args:
+            step_name (str): Label pengenal langkah proses (misal: '01_canvas_ready').
+            description (str): Keterangan penjelasan langkah untuk ditampilkan pada log terminal.
+
+        Returns:
+            Path | None: Lokasi berkas gambar .png yang disimpan jika debug aktif, atau None.
+        """
+        if not self.debug:
+            return None
+        try:
+            self.debug_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_step = re.sub(r"[^\w\-_]", "_", step_name).strip("_")
+            filename = f"{timestamp}_{safe_step}.png"
+            filepath = self.debug_dir / filename
+            png_bytes = self.driver.take_screenshot(full=False)
+            filepath.write_bytes(png_bytes)
+            if description:
+                console.print(
+                    f"[dim magenta]📸 [DEBUG VISUAL][/dim magenta] [dim]{description}[/dim] -> [link=file:///{filepath.as_posix()}]{filepath.name}[/link]"
+                )
+            return filepath
+        except Exception as err:
+            if self.debug:
+                console.print(f"[dim warning]⚠ [DEBUG GAGAL TANGKAP LAYAR]: {err}[/dim warning]")
+            return None
 
     def _detect_download_dir(self) -> Path:
         """Mendeteksi direktori unduhan peramban secara otomatis dengan prioritas D:\\Downloads.
@@ -763,6 +798,7 @@ class ImageGenerator:
                 # Deteksi kegagalan render secara instan tanpa menunggu timeout
                 failed_msg = st.get("failedMsg")
                 if failed_msg:
+                    self.capture_debug_screenshot("tile_render_failed", f"Tile gagal terdeteksi: {failed_msg}")
                     time.sleep(1.0)
                     raise GenerationFailedError(failed_msg)
 
@@ -991,6 +1027,7 @@ def generate_image(
     max_retries: int | None = None,
     retry_delay: float = 12.0,
     auto_launch: bool = True,
+    debug: bool = False,
     **kwargs: object,
 ) -> Path:
     """Fungsi utama tingkat tinggi untuk membuat, mengunduh, dan menyimpan gambar secara senyap.
@@ -1011,6 +1048,10 @@ def generate_image(
     menunggu jeda cooldown, menyegarkan halaman jika diperlukan, dan terus mencoba ulang
     tanpa batasan sampai berkas gambar berhasil diperoleh.
 
+    Mode Debug & Dokumentasi Visual:
+    Jika `debug=True`, setiap langkah siklus otomasi akan didokumentasikan dalam format tangkapan
+    layar gambar PNG di dalam folder `debug/` untuk memudahkan audit dan inspeksi visual.
+
     Args:
         prompt (str): Deskripsi teks gambar yang ingin dibuat.
         output_path (str | Path | None): Jalur folder atau berkas tujuan penyimpanan gambar.
@@ -1021,6 +1062,7 @@ def generate_image(
         max_retries (int | None): Batas maksimal percobaan ulang (default: None, mengulang tanpa batas).
         retry_delay (float): Jeda waktu dalam detik sebelum mengulang percobaan berikutnya (default: 12.0).
         auto_launch (bool): Luncurkan Firefox Portable secara otomatis jika belum berjalan (default: True).
+        debug (bool): Aktifkan mode debug untuk mendokumentasikan setiap langkah via tangkapan layar (default: False).
         **kwargs: Parameter opsional kompatibilitas mundur (misal jika parameter `headless` dioper).
 
     Returns:
@@ -1032,16 +1074,17 @@ def generate_image(
 
     Example:
         >>> from image_generator import generate_image
-        >>> # Simpan otomatis ke folder outputs/ (100% native headless & auto-retry tanpa batas)
-        >>> file_path = generate_image("pemandangan danau pegunungan berkabut saat fajar")
+        >>> # Simpan otomatis ke folder outputs/ dengan mode debug visual
+        >>> file_path = generate_image("pemandangan danau pegunungan berkabut saat fajar", debug=True)
         >>> print("Gambar disimpan di:", file_path)
     """
-    generator = ImageGenerator()
+    generator = ImageGenerator(debug=debug)
 
     try:
         generator.ensure_browser(auto_launch=auto_launch)
         generator.connect()
         generator.find_flow_tab()
+        generator.capture_debug_screenshot("01_canvas_ready", "Kondisi awal kanvas siap")
 
         last_error = None
         attempt = 1
@@ -1061,6 +1104,10 @@ def generate_image(
                         generator.driver.navigate(FLOW_PROJECT_URL)
                         time.sleep(3.5)
                         generator.find_flow_tab()
+                        generator.capture_debug_screenshot(
+                            f"page_refresh_att_{attempt}",
+                            f"Penyegaran halaman kanvas (Percobaan ke-{attempt})",
+                        )
                     except Exception:
                         pass
 
@@ -1069,8 +1116,23 @@ def generate_image(
                     for f in list(generator.download_dir.glob("*.jpg")) + list(generator.download_dir.glob("*.jpeg"))
                 }
                 initial_state = generator.submit_prompt(prompt)
+                generator.capture_debug_screenshot(
+                    f"prompt_submitted_att_{attempt}",
+                    f"Prompt dikirim (Percobaan ke-{attempt})",
+                )
+
                 generator.hover_and_wait_tile(initial_state=initial_state, timeout=timeout)
+                generator.capture_debug_screenshot(
+                    f"render_success_att_{attempt}",
+                    f"Render selesai (Percobaan ke-{attempt})",
+                )
+
                 generator.click_hotbar_and_download()
+                generator.capture_debug_screenshot(
+                    f"download_triggered_att_{attempt}",
+                    f"Memicu unduhan 1K (Percobaan ke-{attempt})",
+                )
+
                 downloaded_file = generator.wait_for_downloaded_file(existing_files=existing, timeout=60)
 
                 # Pemindahan berkas ke lokasi tujuan
@@ -1096,6 +1158,7 @@ def generate_image(
                 # Hapus gambar dari kanvas peramban setelah berkas aman tersimpan
                 try:
                     generator.delete_current_tile()
+                    generator.capture_debug_screenshot("canvas_after_cleanup", "Pembersihan kanvas selesai")
                 except Exception as del_err:
                     console.print(f"[warning]⚠ Catatan pembersihan: {del_err}[/warning]")
 
@@ -1103,6 +1166,10 @@ def generate_image(
 
             except (GenerationFailedError, TimeoutError) as attempt_err:
                 last_error = attempt_err
+                generator.capture_debug_screenshot(
+                    f"failure_state_att_{attempt}",
+                    f"Visual kegagalan (Percobaan ke-{attempt}): {attempt_err}",
+                )
                 generator.clean_failed_tiles()
                 retry_tag = f"Percobaan ke-{attempt}" if max_retries is None else f"Percobaan {attempt}/{max_retries}"
                 console.print(
@@ -1119,7 +1186,7 @@ def generate_image(
 # ==============================================================================
 # CLI PARSER & INTERFACE RUNNER
 # ==============================================================================
-def parse_cli_args() -> tuple[str, str | None, int]:
+def parse_cli_args() -> tuple[str, str | None, int, bool]:
     """Mengekstrak parameter baris perintah (CLI) dengan dukungan prompt tanpa wajib tanda petik.
 
     Peramban selalu dijalankan secara 100% otomatis dalam mode native headless di latar belakang,
@@ -1129,13 +1196,14 @@ def parse_cli_args() -> tuple[str, str | None, int]:
     - `--prompt` / `-p`: Teks prompt (seluruh kata setelah opsi ini digabungkan otomatis).
     - `--output` / `-o` / `--dest` / `-d`: Folder atau nama berkas tujuan pemindahan.
     - `--timeout` / `-t`: Batas waktu maksimal generasi per percobaan dalam detik (default: 180).
+    - `--debug`: Mengaktifkan mode debug dengan dokumentasi visual tangkapan layar (.png).
 
     Returns:
-        tuple[str, str | None, int]: (prompt_text, output_dest, timeout)
+        tuple[str, str | None, int, bool]: (prompt_text, output_dest, timeout, debug_enabled)
 
     Example:
-        `python image_generator.py --prompt pemandangan gunung es -o hasil/`
-        `run.bat --prompt robot astronot di planet mars`
+        `python image_generator.py --prompt pemandangan gunung es -o hasil/ --debug`
+        `run.bat --prompt robot astronot di planet mars --debug`
     """
     args = sys.argv[1:]
     output_flags = ["--output", "-o", "--dest", "-d"]
@@ -1143,13 +1211,20 @@ def parse_cli_args() -> tuple[str, str | None, int]:
     retries_flags = ["--retries", "-r"]
     prompt_flags = ["--prompt", "-p"]
     headless_flags = ["--headless"]
+    debug_flags = ["--debug"]
 
     output_val = None
     timeout_val = 180
+    debug_val = False
     prompt_tokens = []
 
     # Konsumsi flag --headless jika masih dioper oleh pengguna agar kompatibel
     args = [a for a in args if a not in headless_flags]
+
+    # Deteksi flag --debug
+    if any(a in debug_flags for a in args):
+        debug_val = True
+        args = [a for a in args if a not in debug_flags]
 
     i = 0
     while i < len(args):
@@ -1181,6 +1256,9 @@ def parse_cli_args() -> tuple[str, str | None, int]:
                 elif args[i] in retries_flags:
                     # Diabaikan jika ada di tengah token prompt
                     i += 2 if i + 1 < len(args) else 1
+                elif args[i] in debug_flags:
+                    debug_val = True
+                    i += 1
                 else:
                     prompt_tokens.append(args[i])
                     i += 1
@@ -1190,7 +1268,7 @@ def parse_cli_args() -> tuple[str, str | None, int]:
             i += 1
 
     prompt_str = " ".join(prompt_tokens).strip()
-    return prompt_str, output_val, timeout_val
+    return prompt_str, output_val, timeout_val, debug_val
 
 
 def main() -> int:
@@ -1206,7 +1284,7 @@ def main() -> int:
     )
     console.print(Panel(banner, box=box.ROUNDED, style="color(240)"))
 
-    prompt, output_dest, timeout = parse_cli_args()
+    prompt, output_dest, timeout, debug = parse_cli_args()
 
     if not prompt:
         console.print(
@@ -1227,6 +1305,12 @@ def main() -> int:
     table.add_row("Metode Eksekusi", "[bold green]100% Silent Background (Zero Cursor Hijacking)[/bold green]")
     table.add_row("Mode Tampilan", "[bold yellow]100% Native Headless (Tanpa GUI)[/bold yellow]")
     table.add_row("Auto-Retry Penanganan", "[bold green]Tanpa Batas (Loop sampai ada hasil)[/bold green]")
+    table.add_row(
+        "Mode Debug Visual",
+        "[bold magenta]Aktif (Dokumentasi Screenshot di folder debug/)[/bold magenta]"
+        if debug
+        else "[dim]Nonaktif (Gunakan --debug untuk inspeksi visual)[/dim]",
+    )
     table.add_row("Target Pemindahan", f"[accent]{target_display}[/accent]")
     table.add_row("Batas Waktu (Timeout)", f"{timeout} detik/percobaan")
     console.print(table)
@@ -1245,10 +1329,11 @@ def main() -> int:
 
         try:
             progress.update(task, description="[cyan]Memverifikasi peramban & tab Google Flow...")
-            generator = ImageGenerator()
+            generator = ImageGenerator(debug=debug)
             generator.ensure_browser()
             generator.connect()
             generator.find_flow_tab()
+            generator.capture_debug_screenshot("01_canvas_ready", "Kondisi awal kanvas siap")
 
             success = False
             attempt = 1
@@ -1267,6 +1352,10 @@ def main() -> int:
                             generator.driver.navigate(FLOW_PROJECT_URL)
                             time.sleep(3.5)
                             generator.find_flow_tab()
+                            generator.capture_debug_screenshot(
+                                f"page_refresh_att_{attempt}",
+                                f"Penyegaran halaman kanvas (Percobaan ke-{attempt})",
+                            )
                         except Exception:
                             pass
 
@@ -1284,6 +1373,10 @@ def main() -> int:
                         progress.update(task, description="[cyan]Mengirim prompt secara senyap (ProseMirror DOM)...")
 
                     initial_state = generator.submit_prompt(prompt)
+                    generator.capture_debug_screenshot(
+                        f"prompt_submitted_att_{attempt}",
+                        f"Prompt dikirim (Percobaan ke-{attempt})",
+                    )
 
                     progress.update(
                         task,
@@ -1297,9 +1390,17 @@ def main() -> int:
                             description=f"[gold]Menunggu render gambar selesai ({p}% - Percobaan ke-{attempt})...[/gold]",
                         ),
                     )
+                    generator.capture_debug_screenshot(
+                        f"render_success_att_{attempt}",
+                        f"Render gambar selesai (Percobaan ke-{attempt})",
+                    )
 
                     progress.update(task, description="[cyan]Mengeklik hotbar opsi & memicu unduhan 1K...")
                     generator.click_hotbar_and_download()
+                    generator.capture_debug_screenshot(
+                        f"download_triggered_att_{attempt}",
+                        f"Memicu unduhan 1K (Percobaan ke-{attempt})",
+                    )
 
                     progress.update(task, description="[cyan]Menunggu file .jpg di folder unduhan...")
                     downloaded = generator.wait_for_downloaded_file(existing_files=existing, timeout=60)
@@ -1327,6 +1428,7 @@ def main() -> int:
                     progress.update(task, description="[cyan]Menghapus gambar dari kanvas peramban (Pindahkan ke sampah)...")
                     try:
                         generator.delete_current_tile()
+                        generator.capture_debug_screenshot("canvas_after_cleanup", "Pembersihan kanvas selesai")
                     except Exception as del_err:
                         console.print(f"[warning]⚠ Catatan pembersihan: {del_err}[/warning]")
 
@@ -1335,6 +1437,10 @@ def main() -> int:
                     break
 
                 except (GenerationFailedError, TimeoutError) as attempt_err:
+                    generator.capture_debug_screenshot(
+                        f"failure_state_att_{attempt}",
+                        f"Visual kegagalan (Percobaan ke-{attempt}): {attempt_err}",
+                    )
                     generator.clean_failed_tiles()
                     progress.update(
                         task,
@@ -1356,18 +1462,22 @@ def main() -> int:
     summary_table.add_row("Interupsi Kursor Pengguna", "[bold green]✓ 0% (Kursor Bebas Digunakan)[/bold green]")
     summary_table.add_row("Mode Tampilan Jendela", "[bold green]✓ 100% Native Headless (Tanpa GUI)[/bold green]")
     summary_table.add_row("Auto-Retry Penanganan Gagal", f"[bold green]✓ Berhasil pada Percobaan ke-{successful_attempt} (Tanpa Batas)[/bold green]")
+    if debug:
+        summary_table.add_row("Dokumentasi Visual Debug", f"[bold magenta]{generator.debug_dir} (Tersimpan format .png)[/bold magenta]")
     summary_table.add_row("Hotbar & Download 1K", "[bold green]✓ Berhasil Diunduh Resolusi Asli[/bold green]")
     summary_table.add_row("Pembersihan Kanvas", "[bold green]✓ Dipindahkan ke Sampah[/bold green]")
     summary_table.add_row("File Hasil Gambar", f"[bold green]{target_file}[/bold green]")
     console.print(summary_table)
 
+    debug_extra = f"\n[muted]Folder Debug:[/muted] [magenta]{generator.debug_dir}[/magenta]" if debug else ""
     console.print(
         Panel(
             f"[bold green]BERHASIL MENGHASILKAN & MENGUNDUH GAMBAR SECARA SENYAP![/bold green]\n\n"
             f"[muted]Prompt:[/muted] [gold]{prompt}[/gold]\n"
             f"[muted]Lokasi Berkas:[/muted] [white]{target_file}[/white]\n"
             f"[muted]Percobaan:[/muted] [green]Berhasil pada percobaan ke-{successful_attempt} (Loop tanpa batas)[/green]\n"
-            f"[muted]Kursor Mouse:[/muted] [green]Tidak tersentuh sama sekali selama proses berlangsung[/green]",
+            f"[muted]Kursor Mouse:[/muted] [green]Tidak tersentuh sama sekali selama proses berlangsung[/green]"
+            f"{debug_extra}",
             box=box.ROUNDED,
             style="color(240)",
         )

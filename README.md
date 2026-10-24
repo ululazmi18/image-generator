@@ -46,6 +46,9 @@ Argumen prompt dapat diketik langsung tanpa tanda petik:
 
 # 3. Kustomisasi batas waktu per percobaan (timeout dalam detik)
 .\run.bat --timeout 240 --prompt kastil megah fantasi di puncak tebing bersalju
+
+# 4. Mode Debug visual (dokumentasi tangkapan layar setiap langkah ke folder debug/)
+.\run.bat --prompt robot astronot di planet mars --debug
 ```
 
 ---
@@ -67,6 +70,12 @@ file_kustom = generate_image(
     output_path="D:/Project/assets/hero.jpg",
     timeout=200,
 )
+
+# 3. Mengaktifkan mode debug visual (simpan tangkapan layar setiap langkah ke folder debug/)
+file_debug = generate_image(
+    prompt="kastil fantasi di atas awan saat senja",
+    debug=True,
+)
 ```
 
 ---
@@ -83,3 +92,5 @@ file_kustom = generate_image(
    Injeksi prompt menggunakan ProseMirror DOM event, klik tombol generate menggunakan Gecko C++ native click (`WebDriver:ElementClick`), dan navigasi menu unduhan resolusi 1K menggunakan Angular CDK overlay event.
 5. **Pembersihan Otomatis Kanvas:**
    Setelah berkas gambar 1K berhasil diunduh dan dipindahkan ke direktori tujuan, gambar di kanvas Google Flow langsung dihapus (**Pindahkan ke sampah**).
+6. **Mode Debug & Dokumentasi Visual Otomatis:**
+   Dapat diaktifkan melalui opsi `--debug` atau parameter `debug=True`. Setiap langkah otomasi (kondisi kanvas awal, pengiriman prompt, visual galat/batas penggunaan, render 100%, pembukaan menu hotbar unduh, hingga pembersihan kanvas) secara otomatis didokumentasikan dalam format gambar `.png` di direktori `debug/` untuk memudahkan audit dan evaluasi visual tanpa membuka jendela peramban.
