@@ -17,11 +17,18 @@ Image Generator/
 │   └── rules/                 # Aturan proyek termirror dari D:\.agents\rules
 ├── browser_profile/           # Direktori profil Firefox Portable terisolasi (diabaikan Git)
 │   ├── open_browser.bat       # Script peluncur utama peramban profil (kelola akun / GUI)
-│   ├── user.js                # Konfigurasi port otomasi Marionette permanen (2828)
+│   ├── user.js                # Konfigurasi port Marionette (2828) & WebRTC hardening
 │   └── [data profil Firefox]  # Bookmarks, logins, extensions, storage
+├── stealth_addon/             # Native Gecko WebExtension Stealth Bridge (eliminasi webdriver)
+│   ├── manifest.json          # Manifest WebExtension V2
+│   └── stealth.js             # Injeksi exportFunction/cloneInto di Navigator.prototype
 ├── image_generator.py         # Modul inti Python & CLI otomasi Google Flow (v2 Silent)
+├── setup_browser.py           # CLI bootstrapper mandiri untuk install Firefox Portable resmi
+├── harness_audit.py           # QA multi-site benchmark audit suite (17 situs deteksi bot)
+├── REPORT.md                  # Laporan teknis final audit & hasil fingerprint hardening
 ├── run.bat                    # Runner batch utama Windows (klik ganda atau via CLI)
 ├── outputs/                   # Folder hasil unduhan gambar (diabaikan Git)
+├── reports/                   # Laporan run & screenshot evaluasi benchmark (diabaikan Git)
 ├── .gitignore                 # Konfigurasi proteksi privasi profil, output, & cache
 └── README.md                  # Panduan pengoperasian modul
 ```
@@ -94,3 +101,22 @@ file_debug = generate_image(
    Setelah berkas gambar 1K berhasil diunduh dan dipindahkan ke direktori tujuan, gambar di kanvas Google Flow langsung dihapus (**Pindahkan ke sampah**).
 6. **Mode Debug & Dokumentasi Visual Otomatis:**
    Dapat diaktifkan melalui opsi `--debug` atau parameter `debug=True`. Setiap langkah otomasi (kondisi kanvas awal, pengiriman prompt, visual galat/batas penggunaan, render 100%, pembukaan menu hotbar unduh, hingga pembersihan kanvas) secara otomatis didokumentasikan dalam format gambar `.png` di direktori `debug/` untuk memudahkan audit dan evaluasi visual tanpa membuka jendela peramban.
+
+---
+
+## 5. Bootstrapper CLI & QA Benchmark Audit Suite
+
+Proyek ini telah dikeraskan (*hardened*) untuk meminimalkan jejak otomasi peramban dan dapat dideploy dari awal di komputer baru mana pun yang meng-clone repositori ini:
+
+### A. Bootstrapper Firefox Portable Mandiri
+Unduh dan pasang peramban secara otomatis tanpa antarmuka GUI:
+```powershell
+python setup_browser.py
+```
+
+### B. Audit Jejak Otomasi pada 17 Situs Benchmark
+Jalankan harness pengujian benchmark bot detection dan fingerprinting:
+```powershell
+python harness_audit.py --run-id audit_verifikasi
+```
+Laporan evaluasi perbandingan lengkap dan artefak tangkapan layar full-page `.png` didokumentasikan secara komprehensif pada [REPORT.md](file:///d:/Documents/Image%20Generator/REPORT.md).
