@@ -27,6 +27,7 @@ screenshots/
 outputs/
 debug/
 reports/
+deploy_staging/
 
 # Portable Browser Binaries & Downloaders
 firefox_portable/
