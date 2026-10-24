@@ -197,6 +197,17 @@ def main() -> int:
     parser.add_argument("--download", action="store_true", help="Paksa download ulang Firefox Portable resmi")
     parser.add_argument("--force", action="store_true", help="Timpa instalasi lama jika sudah ada")
     parser.add_argument("--status", action="store_true", help="Periksa status ketersediaan Firefox Portable saat ini")
+    parser.add_argument(
+        "--open",
+        action="store_true",
+        help="Buka Firefox Portable dalam mode GUI untuk login akun Google / kelola profil",
+    )
+    parser.add_argument(
+        "--url",
+        type=str,
+        default="https://accounts.google.com",
+        help="URL yang dibuka saat mode --open aktif (default: https://accounts.google.com)",
+    )
 
     args = parser.parse_args()
 
@@ -209,6 +220,40 @@ def main() -> int:
     )
 
     current_bin = get_firefox_executable()
+
+    if args.open:
+        if not current_bin:
+            console.print("[error]✗ Biner Firefox Portable belum terpasang. Jalankan setup_browser.py untuk memasangnya.[/error]")
+            return 1
+
+        lock_file = DEFAULT_PROFILE_DIR / "parent.lock"
+        if lock_file.exists():
+            try:
+                lock_file.unlink()
+            except Exception:
+                pass
+
+        console.print(
+            Panel(
+                f"[bold cyan]MEMBUKA FIREFOX PORTABLE (MODE GUI)[/bold cyan]\n"
+                f"Lokasi Biner : [cyan]{current_bin}[/cyan]\n"
+                f"Folder Profil: [cyan]{DEFAULT_PROFILE_DIR}[/cyan]\n"
+                f"Target URL   : [green]{args.url}[/green]\n\n"
+                f"[muted]Silakan login ke akun Google Anda pada jendela peramban yang terbuka.\n"
+                f"Seluruh sesi (cookies & otentikasi) otomatis tersimpan permanen di profil.[/muted]",
+                box=box.ROUNDED,
+            )
+        )
+        cmd = [
+            str(current_bin),
+            "-no-remote",
+            "-profile",
+            str(DEFAULT_PROFILE_DIR),
+            args.url,
+        ]
+        subprocess.Popen(cmd)
+        console.print("[success]✓ Jendela peramban telah diluncurkan.[/success]")
+        return 0
 
     if args.status:
         table = Table(box=box.ROUNDED)
