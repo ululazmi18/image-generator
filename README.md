@@ -16,9 +16,7 @@ Image Generator/
 │   │   └── memory.db          # Basis data memori SQLite FTS5
 │   └── rules/                 # Aturan proyek termirror dari D:\.agents\rules
 ├── browser_profile/           # Direktori profil Firefox Portable terisolasi (diabaikan Git)
-│   ├── starter.bat            # Script peluncur utama browser profil
-│   ├── start_browser.bat      # Alias peluncur cepat browser profil
-│   ├── starter.py             # Peluncur alternatif berbasis Python Rich
+│   ├── open_browser.bat       # Script peluncur utama peramban profil (kelola akun / GUI)
 │   ├── user.js                # Konfigurasi port otomasi Marionette permanen (2828)
 │   └── [data profil Firefox]  # Bookmarks, logins, extensions, storage
 ├── image_generator.py         # Modul inti Python & CLI otomasi Google Flow (v2 Silent)
