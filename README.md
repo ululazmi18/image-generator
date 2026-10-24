@@ -38,16 +38,16 @@ Skrip akan menampilkan banner antarmuka, meminta Anda memasukkan teks prompt, la
 Argumen prompt dapat diketik langsung tanpa tanda petik:
 
 ```powershell
-# 1. Menghasilkan gambar dengan prompt langsung
+# 1. Menghasilkan gambar dengan prompt langsung (100% otomatis headless)
 .\run.bat --prompt pemandangan danau pegunungan saat fajar berkabut
 
 # 2. Menentukan direktori/nama file tujuan (-o / --output)
 .\run.bat --prompt kucing lucu di taman bunga sakura -o outputs/
 
-# 3. Mode Headless (murni tanpa antarmuka grafis di latar belakang)
-.\run.bat --headless --prompt robot astronot di planet mars
+# 3. Kustomisasi batas percobaan ulang jika generasi gagal (-r / --retries)
+.\run.bat --prompt robot astronot di planet mars --retries 5
 
-# 4. Kustomisasi batas waktu (timeout dalam detik)
+# 4. Kustomisasi batas waktu per percobaan (timeout dalam detik)
 .\run.bat --timeout 240 --prompt kastil megah fantasi di puncak tebing bersalju
 ```
 
@@ -55,21 +55,22 @@ Argumen prompt dapat diketik langsung tanpa tanda petik:
 
 ## 3. Penggunaan Sebagai Modul Python (*Callable API*)
 
-Modul [image_generator.py](file:///d:/Documents/Image%20Generator/image_generator.py) memiliki dokumentasi tipe dan docstrings lengkap (*hover tooltip* di editor IDE). Dapat diimpor langsung oleh skrip atau modul lain:
+Modul [image_generator.py](file:///d:/Documents/Image%20Generator/image_generator.py) memiliki dokumentasi tipe dan docstrings lengkap (*hover tooltip* di editor IDE). Dapat diimpor langsung oleh skrip atau modul lain, dan secara permanen selalu berjalan dalam mode native headless di latar belakang dengan dukungan pemulihan mandiri (*self-healing auto-retry*):
 
 ```python
 from image_generator import generate_image
 
-# 1. Simpan otomatis ke folder default (outputs/)
+# 1. Simpan otomatis ke folder default (outputs/) — 100% native headless & auto-retry jika gagal
 file_gambar = generate_image("pemandangan matahari terbenam di pantai tropis")
 print("Tersimpan di:", file_gambar)
 
-# 2. Atau tentukan folder / nama berkas tujuan secara spesifik
+# 2. Kustomisasi folder tujuan, batas timeout, dan maksimal pengulangan jika gagal
 file_kustom = generate_image(
     prompt="cyberpunk neon city futuristic car",
     output_path="D:/Project/assets/hero.jpg",
-    headless=True,  # Mode tanpa GUI di latar belakang
-    timeout=180     # Batas waktu maksimal dalam detik
+    timeout=180,
+    max_retries=5,
+    retry_delay=6.0
 )
 ```
 
@@ -77,11 +78,13 @@ file_kustom = generate_image(
 
 ## 4. Keunggulan Arsitektur Silent Background
 
-1. **Zero Cursor Hijacking (0% Interupsi Kursor):**
+1. **Auto-Retry & Self-Healing:**
+   Google Flow terkadang gagal merender (misal: "Anda telah mencapai batas penggunaan" atau server error). Skrip mendeteksi tile kegagalan secara instan dalam 1–2 detik, membersihkannya dari kanvas, dan secara otomatis langsung mengulang proses mulai dari input prompt hingga berhasil.
+2. **Zero Cursor Hijacking (0% Interupsi Kursor):**
    Tidak menyentuh mouse kursor fisik Windows, clipboard OS, atau keyboard hardware. Pengguna bebas mengetik, bekerja, atau bermain game tanpa interupsi.
-2. **Background & Minimized Mode:**
-   Peramban dijalankan dalam status terminimalkan (`SW_SHOWMINNOACTIVE`) tanpa mencuri fokus jendela aktif pengguna, atau mode `--headless` murni tanpa jendela.
-3. **Stealth DOM & Gecko Bridge:**
+3. **100% Native Headless Mode:**
+   Peramban Firefox Portable diluncurkan secara permanen dalam mode `-headless` murni di latar belakang tanpa jendela GUI sama sekali di layar, tanpa perlu mengonfigurasi opsi tambahan.
+4. **Stealth DOM & Gecko Bridge:**
    Injeksi prompt menggunakan ProseMirror DOM event, klik tombol generate menggunakan Gecko C++ native click (`WebDriver:ElementClick`), dan navigasi menu unduhan resolusi 1K menggunakan Angular CDK overlay event.
-4. **Pembersihan Otomatis Kanvas:**
+5. **Pembersihan Otomatis Kanvas:**
    Setelah berkas gambar 1K berhasil diunduh dan dipindahkan ke direktori tujuan, gambar di kanvas Google Flow langsung dihapus (**Pindahkan ke sampah**).

@@ -8,9 +8,9 @@ Fitur Utama:
 1. Zero Cursor Hijacking:
    Tidak menggunakan pergerakan mouse kursor fisik Windows, keyboard OS, atau clipboard.
    Pengguna bebas mengetik, bekerja, atau bermain game tanpa terganggu sedikit pun.
-2. Background & Minimized Mode:
-   Peramban Firefox Portable diluncurkan dalam keadaan terminimalkan (SW_SHOWMINNOACTIVE)
-   atau mode -headless murni sehingga tidak memunculkan jendela yang mengganggu layar.
+2. Native Headless Background Mode:
+   Peramban Firefox Portable diluncurkan secara permanen dan natif dalam mode -headless murni,
+   sehingga 100% tanpa antarmuka jendela grafis (GUI) di layar dan tidak mengganggu aktivitas pengguna.
 3. Otomasi Siklus Penuh:
    Memasukkan teks prompt -> Memicu pembuatan gambar -> Memantau progres (0%-100%) ->
    Mengunduh resolusi asli 1K -> Memindahkan berkas ke folder tujuan -> Menghapus tile
@@ -74,6 +74,19 @@ console = Console(theme=CUSTOM_THEME)
 # ==============================================================================
 FLOW_PROJECT_URL = "https://flow.google.com/project/d2653e23-18ab-4dda-b15b-3a77cf1085dd"
 FLOW_HOME_URL = "https://flow.google.com/"
+
+
+# ==============================================================================
+# PENGECUALIAN KHUSUS OTOMASI (CUSTOM EXCEPTIONS)
+# ==============================================================================
+class GenerationFailedError(RuntimeError):
+    """Pengecualian yang dilemparkan saat Google Flow menampilkan tile galat/gagal di kanvas.
+
+    Misalnya jika terdeteksi teks 'Gagal', 'Anda telah mencapai batas penggunaan',
+    atau kegagalan komputasi server pembuatan gambar lainnya.
+    """
+
+    pass
 
 
 # ==============================================================================
@@ -419,15 +432,14 @@ class ImageGenerator:
             with open(user_js, "a", encoding="utf-8") as f:
                 f.write("\n" + "\n".join(missing) + "\n")
 
-    def ensure_browser(self, auto_launch: bool = True, headless: bool = False) -> None:
-        """Memastikan Firefox berjalan dengan mode stealth dan mendengarkan port otomasi 2828.
+    def ensure_browser(self, auto_launch: bool = True) -> None:
+        """Memastikan Firefox berjalan dalam mode native headless dan mendengarkan port otomasi 2828.
 
         Jika peramban belum aktif dan auto_launch=True, peramban akan diluncurkan secara
-        terminimalkan di latar belakang (SW_SHOWMINNOACTIVE) atau mode -headless tanpa GUI.
+        permanen dalam mode -headless murni tanpa jendela grafis sama sekali di latar belakang.
 
         Args:
             auto_launch (bool): Luncurkan peramban secara otomatis jika belum berjalan (default: True).
-            headless (bool): Jika True, peramban dijalankan tanpa jendela grafis sama sekali (default: False).
 
         Raises:
             RuntimeError: Jika port otomasi tidak terbuka setelah batas waktu tunggu peluncuran habis.
@@ -449,24 +461,21 @@ class ImageGenerator:
             Prompt.ask("[cyan]Tekan Enter setelah menutup jendela Firefox...[/cyan]")
 
         if auto_launch:
-            mode_desc = "headless (tanpa GUI)" if headless else "minimized background (tanpa ganggu fokus)"
-            console.print(f"[info]ℹ[/info] Meluncurkan peramban Firefox dalam mode {mode_desc}...")
+            console.print("[info]ℹ[/info] Meluncurkan peramban Firefox dalam mode headless (tanpa GUI)...")
             env = os.environ.copy()
             env["MOZ_CRASHREPORTER_DISABLE"] = "1"
             env["MOZ_CRASHREPORTER_NO_REPORT"] = "1"
 
-            cmd = [str(self.ff_bin), "-no-remote", "-marionette", "-profile", str(self.profile_dir)]
-            if headless:
-                cmd.append("-headless")
+            cmd = [
+                str(self.ff_bin),
+                "-no-remote",
+                "-headless",
+                "-marionette",
+                "-profile",
+                str(self.profile_dir),
+            ]
 
-            # Buka terminimalkan tanpa mencuri fokus jendela pengguna (SW_SHOWMINNOACTIVE = 7)
-            startupinfo = None
-            if sys.platform == "win32" and not headless:
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 7
-
-            self.proc = subprocess.Popen(cmd, env=env, startupinfo=startupinfo)
+            self.proc = subprocess.Popen(cmd, env=env)
 
             opened = False
             for _ in range(30):
@@ -559,14 +568,50 @@ class ImageGenerator:
 
         return handles[0]
 
+    def clean_failed_tiles(self) -> int:
+        """Mendeteksi dan menghapus tile error/gagal yang masih ada pada kanvas Google Flow.
+
+        Memindai seluruh elemen tile pada kanvas untuk menemukan pesan galat seperti
+        'Gagal', 'Failed', 'batas penggunaan', 'coba lagi', atau 'error', lalu mengeklik
+        tombol hapus ('delete_forever' / 'delete' / 'hapus') pada tile tersebut secara senyap.
+
+        Returns:
+            int: Jumlah tile gagal yang berhasil dibersihkan dari kanvas.
+        """
+        clean_script = """
+        const tiles = Array.from(document.querySelectorAll('flow-image-tile, flow-grid-tile-container'));
+        let deleted = 0;
+        for (const t of tiles) {
+            const txt = (t.innerText || '').toLowerCase();
+            if (txt.includes('gagal') || txt.includes('failed') || txt.includes('coba lagi') || txt.includes('batas penggunaan') || txt.includes('error') || txt.includes('tidak dapat membuat')) {
+                const delBtn = Array.from(t.querySelectorAll('button')).find(b => {
+                    const bTxt = (b.innerText || '').toLowerCase();
+                    const bAria = (b.getAttribute('aria-label') || '').toLowerCase();
+                    return bTxt.includes('delete') || bAria.includes('delete') || bTxt.includes('hapus') || bAria.includes('hapus');
+                });
+                if (delBtn) {
+                    delBtn.click();
+                    deleted++;
+                }
+            }
+        }
+        return deleted;
+        """
+        try:
+            res = self.driver.execute_script(clean_script)
+            return int(res) if res is not None else 0
+        except Exception:
+            return 0
+
     def submit_prompt(self, prompt_text: str) -> dict:
         """Memasukkan teks prompt ke editor ProseMirror dan memicu tombol buat gambar secara senyap.
 
         Alur:
-        1. Mencatat snapshot kondisi kanvas saat ini (jumlah gambar & URL gambar teratas).
-        2. Memfokuskan editor ProseMirror (`flow-rich-text-editor div[contenteditable="true"]`).
-        3. Memasukkan teks prompt via `document.execCommand('insertText')` dan memicu `InputEvent`.
-        4. Mengeklik tombol 'Mulai pembuatan' (`flow-generate-icon-button button`) melalui Gecko
+        1. Membersihkan tile gagal sebelumnya jika ada di kanvas.
+        2. Mencatat snapshot kondisi kanvas saat ini (jumlah gambar & URL gambar teratas).
+        3. Memfokuskan editor ProseMirror (`flow-rich-text-editor div[contenteditable="true"]`).
+        4. Membersihkan teks lama, memasukkan teks prompt via DOM execCommand, dan memicu InputEvent.
+        5. Mengeklik tombol 'Mulai pembuatan' (`flow-generate-icon-button button`) melalui Gecko
            native click tanpa menggerakkan kursor mouse pengguna.
 
         Args:
@@ -578,6 +623,8 @@ class ImageGenerator:
         Raises:
             RuntimeError: Jika elemen editor prompt tidak ditemukan pada halaman.
         """
+        self.clean_failed_tiles()
+
         # Catat snapshot kondisi kanvas sebelum generasi baru dimulai
         snapshot_script = """
         const firstImg = document.querySelector('flow-image-tile img');
@@ -597,6 +644,7 @@ class ImageGenerator:
 
         editor.focus();
         document.execCommand('selectAll', false, null);
+        document.execCommand('delete', false, null);
         document.execCommand('insertText', false, prompt);
         editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: prompt }));
         editor.dispatchEvent(new Event('change', { bubbles: true }));
@@ -639,9 +687,9 @@ class ImageGenerator:
     ) -> bool:
         """Memantau progres generasi gambar (0% -> 100%) dan menunggu render tile baru selesai.
 
-        Menggunakan perbandingan status kanvas terhadap `initial_state` untuk membedakan
-        gambar baru dari gambar yang sudah ada sebelumnya pada kanvas. Mengirimkan pembaruan
-        persentase secara langsung ke `progress_callback` jika tersedia.
+        Mendeteksi kegagalan generasi (seperti batas penggunaan / server error) secara instan.
+        Jika terdeteksi kegagalan di kanvas, fungsi segera menghapus tile gagal tersebut dan
+        melemparkan `GenerationFailedError` agar proses dapat langsung diulang dari awal.
 
         Args:
             initial_state (dict | None): Snapshot kanvas awal hasil dari `submit_prompt()`.
@@ -653,6 +701,7 @@ class ImageGenerator:
             bool: True jika gambar selesai dirender dan hotbar menu opsi siap diakses.
 
         Raises:
+            GenerationFailedError: Jika peramban Google Flow menampilkan tile galat/gagal.
             TimeoutError: Jika waktu tunggu habis sebelum gambar selesai dirender.
         """
         start_time = time.time()
@@ -660,12 +709,31 @@ class ImageGenerator:
         init_src = (initial_state or {}).get("firstImgSrc")
 
         check_script = """
-        const bodyText = document.body.innerText;
-        const progressMatch = bodyText.match(/(\\d+)%/);
-        const firstTile = document.querySelector('flow-image-tile');
+        const tiles = Array.from(document.querySelectorAll('flow-image-tile, flow-grid-tile-container'));
+        const firstTile = document.querySelector('flow-image-tile') || tiles[0];
+        const tileText = firstTile ? firstTile.innerText : '';
+        const progressMatch = tileText.match(/(\\d+)%/);
         const firstImg = firstTile ? firstTile.querySelector('img') : null;
         const allImgs = document.querySelectorAll('flow-image-tile img');
         const btn = document.querySelector('flow-generate-icon-button button');
+        const isImgLoaded = firstImg ? (firstImg.complete && firstImg.naturalWidth > 0) : false;
+
+        let failedMsg = null;
+        for (const t of tiles) {
+            const txt = (t.innerText || '').toLowerCase();
+            if (txt.includes('gagal') || txt.includes('failed') || txt.includes('batas penggunaan') || txt.includes('coba lagi') || txt.includes('error') || txt.includes('tidak dapat membuat')) {
+                failedMsg = t.innerText.replace(/\\n/g, ' -- ');
+                const delBtn = Array.from(t.querySelectorAll('button')).find(b => {
+                    const bTxt = (b.innerText || '').toLowerCase();
+                    const bAria = (b.getAttribute('aria-label') || '').toLowerCase();
+                    return bTxt.includes('delete') || bAria.includes('delete') || bTxt.includes('hapus') || bAria.includes('hapus');
+                });
+                if (delBtn) {
+                    delBtn.click();
+                }
+                break;
+            }
+        }
 
         let hotbarReady = false;
         if (firstTile) {
@@ -678,9 +746,11 @@ class ImageGenerator:
         return {
             imgCount: allImgs.length,
             firstImgSrc: firstImg ? firstImg.src : null,
+            isImgLoaded: isImgLoaded,
             progress: progressMatch ? progressMatch[1] : null,
             btnDisabled: btn ? btn.disabled : false,
-            hotbarReady: hotbarReady
+            hotbarReady: hotbarReady,
+            failedMsg: failedMsg
         };
         """
 
@@ -690,6 +760,12 @@ class ImageGenerator:
         while time.time() - start_time < timeout:
             st = self.driver.execute_script(check_script)
             if isinstance(st, dict):
+                # Deteksi kegagalan render secara instan tanpa menunggu timeout
+                failed_msg = st.get("failedMsg")
+                if failed_msg:
+                    time.sleep(1.0)
+                    raise GenerationFailedError(failed_msg)
+
                 current_prog = st.get("progress")
                 if current_prog:
                     seen_progress = True
@@ -705,11 +781,16 @@ class ImageGenerator:
                 is_new_image = (img_count > init_count) or (first_src and first_src != init_src)
 
                 # 1. Progres pernah berjalan dan sekarang sudah 100% (progress == None)
-                if seen_progress and not current_prog and is_new_image and st.get("hotbarReady"):
+                if seen_progress and not current_prog and is_new_image:
                     time.sleep(1.0)
                     return True
 
-                # 2. Gambar baru terdeteksi dengan hotbar siap (fallback batas minimum 8 detik)
+                # 2. Gambar baru terdeteksi sudah selesai dimuat (isImgLoaded)
+                if is_new_image and not current_prog and st.get("isImgLoaded"):
+                    time.sleep(1.0)
+                    return True
+
+                # 3. Fallback jika hotbar siap setelah beberapa detik
                 if is_new_image and not current_prog and st.get("hotbarReady") and (time.time() - start_time > 8):
                     time.sleep(1.0)
                     return True
@@ -907,14 +988,16 @@ def generate_image(
     prompt: str,
     output_path: str | Path | None = None,
     timeout: int = 180,
+    max_retries: int = 3,
+    retry_delay: float = 6.0,
     auto_launch: bool = True,
-    headless: bool = False,
+    **kwargs: object,
 ) -> Path:
     """Fungsi utama tingkat tinggi untuk membuat, mengunduh, dan menyimpan gambar secara senyap.
 
-    Fungsi ini menjalankan seluruh siklus kerja otomasi Google Flow di latar belakang
-    tanpa mengganggu kursor mouse atau fokus jendela pengguna (*zero cursor hijacking*):
-    1. Memverifikasi/menjalankan Firefox Portable dalam mode latar belakang stealth.
+    Fungsi ini menjalankan seluruh siklus kerja otomasi Google Flow secara 100% natif
+    dalam mode headless di latar belakang tanpa jendela GUI dan tanpa mengganggu kursor (*zero cursor hijacking*):
+    1. Memverifikasi/menjalankan Firefox Portable secara otomatis dalam mode -headless murni.
     2. Mendeteksi tab Google Flow aktif atau mengarahkannya ke proyek.
     3. Mengisi prompt ke editor ProseMirror dan memicu pembuatan gambar.
     4. Menunggu hingga generasi selesai (0% -> 100%).
@@ -922,79 +1005,109 @@ def generate_image(
     6. Memindahkan file gambar dari folder unduhan ke direktori tujuan yang diminta.
     7. Menghapus tile gambar dari kanvas Google Flow ('Pindahkan ke sampah').
 
+    Fitur Pemulihan Mandiri (Auto-Retry on Failure):
+    Jika proses render gagal di sisi Google Flow (misal terkena batas penggunaan atau kendala
+    server), fungsi secara otomatis mendeteksi tile gagal, membersihkannya dari kanvas,
+    dan langsung mengulang proses mulai dari input prompt hingga batas `max_retries`.
+
     Args:
         prompt (str): Deskripsi teks gambar yang ingin dibuat.
         output_path (str | Path | None): Jalur folder atau berkas tujuan penyimpanan gambar.
             - Jika berupa folder: berkas disimpan dengan format slug prompt dan timestamp.
             - Jika berupa path berkas .jpg: berkas disimpan persis dengan nama tersebut.
             - Jika None: otomatis disimpan di folder 'outputs/' pada root workspace.
-        timeout (int): Batas waktu maksimal proses pembuatan gambar dalam detik (default: 180).
+        timeout (int): Batas waktu maksimal proses pembuatan gambar per percobaan dalam detik (default: 180).
+        max_retries (int): Jumlah maksimal pengulangan percobaan jika generasi gagal (default: 3).
+        retry_delay (float): Jeda waktu dalam detik sebelum mengulang percobaan berikutnya (default: 6.0).
         auto_launch (bool): Luncurkan Firefox Portable secara otomatis jika belum berjalan (default: True).
-        headless (bool): Jika True, peramban berjalan tanpa GUI sama sekali di latar belakang (default: False).
+        **kwargs: Parameter opsional kompatibilitas mundur (misal jika parameter `headless` dioper).
 
     Returns:
         Path: Lokasi absolut berkas gambar .jpg yang berhasil dibuat dan dipindahkan.
 
     Raises:
-        RuntimeError: Jika terjadi kegagalan koneksi peramban atau elemen web tidak ditemukan.
-        TimeoutError: Jika waktu tunggu pembuatan gambar atau pengunduhan habis.
+        RuntimeError: Jika seluruh percobaan gagal atau terjadi kegagalan fatal koneksi peramban.
+        TimeoutError: Jika waktu tunggu pembuatan gambar atau pengunduhan habis di semua percobaan.
 
     Example:
         >>> from image_generator import generate_image
-        >>> # Simpan otomatis ke folder outputs/
+        >>> # Simpan otomatis ke folder outputs/ (100% native headless dengan auto-retry)
         >>> file_path = generate_image("pemandangan danau pegunungan berkabut saat fajar")
         >>> print("Gambar disimpan di:", file_path)
         >>>
-        >>> # Kustomisasi nama berkas dan lokasi tujuan
+        >>> # Kustomisasi nama berkas, batas percobaan, dan lokasi tujuan
         >>> file_kustom = generate_image(
         ...     prompt="cyberpunk robot cat neon city",
         ...     output_path="D:/Project/assets/hero_image.jpg",
-        ...     headless=True
+        ...     timeout=200,
+        ...     max_retries=5
         ... )
     """
     generator = ImageGenerator()
 
     try:
-        generator.ensure_browser(auto_launch=auto_launch, headless=headless)
+        generator.ensure_browser(auto_launch=auto_launch)
         generator.connect()
-
-        existing = {
-            str(f.resolve())
-            for f in list(generator.download_dir.glob("*.jpg")) + list(generator.download_dir.glob("*.jpeg"))
-        }
         generator.find_flow_tab()
-        initial_state = generator.submit_prompt(prompt)
-        generator.hover_and_wait_tile(initial_state=initial_state, timeout=timeout)
-        generator.click_hotbar_and_download()
-        downloaded_file = generator.wait_for_downloaded_file(existing_files=existing, timeout=60)
 
-        # Pemindahan berkas ke lokasi tujuan
-        if output_path is None:
-            dest_dir = generator.workspace_dir / "outputs"
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            slug = re.sub(r"[^\w\s-]", "", prompt)[:30].strip().replace(" ", "_")
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            target_file = dest_dir / f"{slug}_{timestamp}.jpg"
-        else:
-            target_path = Path(output_path).resolve()
-            if target_path.is_dir() or (not target_path.suffix and not target_path.exists()):
-                target_path.mkdir(parents=True, exist_ok=True)
-                slug = re.sub(r"[^\w\s-]", "", prompt)[:30].strip().replace(" ", "_")
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                target_file = target_path / f"{slug}_{timestamp}.jpg"
-            else:
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                target_file = target_path
+        last_error = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                # Bersihkan sisa tile gagal sebelumnya jika ada di kanvas
+                generator.clean_failed_tiles()
 
-        shutil.move(str(downloaded_file), str(target_file))
+                existing = {
+                    str(f.resolve())
+                    for f in list(generator.download_dir.glob("*.jpg")) + list(generator.download_dir.glob("*.jpeg"))
+                }
+                initial_state = generator.submit_prompt(prompt)
+                generator.hover_and_wait_tile(initial_state=initial_state, timeout=timeout)
+                generator.click_hotbar_and_download()
+                downloaded_file = generator.wait_for_downloaded_file(existing_files=existing, timeout=60)
 
-        # Hapus gambar dari kanvas peramban setelah berkas aman tersimpan
-        try:
-            generator.delete_current_tile()
-        except Exception as del_err:
-            console.print(f"[warning]⚠ Catatan pembersihan: {del_err}[/warning]")
+                # Pemindahan berkas ke lokasi tujuan
+                if output_path is None:
+                    dest_dir = generator.workspace_dir / "outputs"
+                    dest_dir.mkdir(parents=True, exist_ok=True)
+                    slug = re.sub(r"[^\w\s-]", "", prompt)[:30].strip().replace(" ", "_")
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    target_file = dest_dir / f"{slug}_{timestamp}.jpg"
+                else:
+                    target_path = Path(output_path).resolve()
+                    if target_path.is_dir() or (not target_path.suffix and not target_path.exists()):
+                        target_path.mkdir(parents=True, exist_ok=True)
+                        slug = re.sub(r"[^\w\s-]", "", prompt)[:30].strip().replace(" ", "_")
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        target_file = target_path / f"{slug}_{timestamp}.jpg"
+                    else:
+                        target_path.parent.mkdir(parents=True, exist_ok=True)
+                        target_file = target_path
 
-        return target_file
+                shutil.move(str(downloaded_file), str(target_file))
+
+                # Hapus gambar dari kanvas peramban setelah berkas aman tersimpan
+                try:
+                    generator.delete_current_tile()
+                except Exception as del_err:
+                    console.print(f"[warning]⚠ Catatan pembersihan: {del_err}[/warning]")
+
+                return target_file
+
+            except (GenerationFailedError, TimeoutError) as attempt_err:
+                last_error = attempt_err
+                generator.clean_failed_tiles()
+                if attempt < max_retries:
+                    console.print(
+                        f"[warning]⚠ Percobaan {attempt}/{max_retries} terdeteksi gagal ({attempt_err}). "
+                        f"Mengulang dari input prompt dalam {retry_delay:.0f} detik...[/warning]"
+                    )
+                    time.sleep(retry_delay)
+                else:
+                    raise RuntimeError(
+                        f"Gagal membuat gambar setelah {max_retries} kali percobaan berturut-turut. Kesalahan terakhir: {attempt_err}"
+                    )
+
+        raise RuntimeError(f"Gagal membuat gambar setelah {max_retries} kali percobaan. Kesalahan: {last_error}")
 
     finally:
         generator.close()
@@ -1003,36 +1116,38 @@ def generate_image(
 # ==============================================================================
 # CLI PARSER & INTERFACE RUNNER
 # ==============================================================================
-def parse_cli_args() -> tuple[str, str | None, int, bool]:
+def parse_cli_args() -> tuple[str, str | None, int, int]:
     """Mengekstrak parameter baris perintah (CLI) dengan dukungan prompt tanpa wajib tanda petik.
+
+    Peramban selalu dijalankan secara 100% otomatis dalam mode native headless di latar belakang.
 
     Mendukung opsi:
     - `--prompt` / `-p`: Teks prompt (seluruh kata setelah opsi ini digabungkan otomatis).
     - `--output` / `-o` / `--dest` / `-d`: Folder atau nama berkas tujuan pemindahan.
-    - `--timeout` / `-t`: Batas waktu maksimal generasi dalam detik (default: 180).
-    - `--headless`: Menjalankan peramban murni tanpa jendela GUI.
+    - `--timeout` / `-t`: Batas waktu maksimal generasi per percobaan dalam detik (default: 180).
+    - `--retries` / `-r`: Jumlah maksimal percobaan ulang jika generasi gagal (default: 3).
 
     Returns:
-        tuple[str, str | None, int, bool]: (prompt_text, output_dest, timeout, headless_mode)
+        tuple[str, str | None, int, int]: (prompt_text, output_dest, timeout, max_retries)
 
     Example:
         `python image_generator.py --prompt pemandangan gunung es -o hasil/`
-        `run.bat --headless --prompt robot kucing futuristik`
+        `run.bat --prompt robot astronot di planet mars --retries 5`
     """
     args = sys.argv[1:]
     output_flags = ["--output", "-o", "--dest", "-d"]
     timeout_flags = ["--timeout", "-t"]
+    retries_flags = ["--retries", "-r"]
     prompt_flags = ["--prompt", "-p"]
-    headless_flag = "--headless"
+    headless_flags = ["--headless"]
 
     output_val = None
     timeout_val = 180
-    headless_val = False
+    retries_val = 3
     prompt_tokens = []
 
-    if headless_flag in args:
-        headless_val = True
-        args = [a for a in args if a != headless_flag]
+    # Konsumsi flag --headless jika masih dioper oleh pengguna agar kompatibel
+    args = [a for a in args if a not in headless_flags]
 
     i = 0
     while i < len(args):
@@ -1043,6 +1158,12 @@ def parse_cli_args() -> tuple[str, str | None, int, bool]:
         elif arg in timeout_flags and i + 1 < len(args):
             try:
                 timeout_val = int(args[i + 1])
+            except ValueError:
+                pass
+            i += 2
+        elif arg in retries_flags and i + 1 < len(args):
+            try:
+                retries_val = int(args[i + 1])
             except ValueError:
                 pass
             i += 2
@@ -1058,6 +1179,12 @@ def parse_cli_args() -> tuple[str, str | None, int, bool]:
                     except (ValueError, IndexError):
                         pass
                     i += 2
+                elif args[i] in retries_flags:
+                    try:
+                        retries_val = int(args[i + 1])
+                    except (ValueError, IndexError):
+                        pass
+                    i += 2
                 else:
                     prompt_tokens.append(args[i])
                     i += 1
@@ -1067,11 +1194,11 @@ def parse_cli_args() -> tuple[str, str | None, int, bool]:
             i += 1
 
     prompt_str = " ".join(prompt_tokens).strip()
-    return prompt_str, output_val, timeout_val, headless_val
+    return prompt_str, output_val, timeout_val, retries_val
 
 
 def main() -> int:
-    """Titik masuk eksekusi utama CLI dengan antarmuka Rich terminal dan progres dinamis.
+    """Titik masuk eksekusi utama CLI dengan antarmuka Rich terminal dan auto-retry dinamis.
 
     Returns:
         int: Kode keluar proses (0 jika sukses, 1 jika terjadi kegagalan).
@@ -1083,7 +1210,7 @@ def main() -> int:
     )
     console.print(Panel(banner, box=box.ROUNDED, style="color(240)"))
 
-    prompt, output_dest, timeout, headless = parse_cli_args()
+    prompt, output_dest, timeout, max_retries = parse_cli_args()
 
     if not prompt:
         console.print(
@@ -1102,13 +1229,15 @@ def main() -> int:
     table.add_column("Nilai", style="bold white")
     table.add_row("Prompt Teks", f"[gold]{prompt}[/gold]")
     table.add_row("Metode Eksekusi", "[bold green]100% Silent Background (Zero Cursor Hijacking)[/bold green]")
-    table.add_row(
-        "Mode Tampilan",
-        "[yellow]Headless (Tanpa GUI)[/yellow]" if headless else "[cyan]Minimized Background[/cyan]",
-    )
+    table.add_row("Mode Tampilan", "[bold yellow]100% Native Headless (Tanpa GUI)[/bold yellow]")
+    table.add_row("Maksimal Percobaan", f"[cyan]{max_retries}x (Auto-Retry jika Gagal)[/cyan]")
     table.add_row("Target Pemindahan", f"[accent]{target_display}[/accent]")
-    table.add_row("Batas Waktu (Timeout)", f"{timeout} detik")
+    table.add_row("Batas Waktu (Timeout)", f"{timeout} detik/percobaan")
     console.print(table)
+
+    target_file = None
+    successful_attempt = 1
+    retry_delay = 6.0
 
     with Progress(
         SpinnerColumn(),
@@ -1121,71 +1250,111 @@ def main() -> int:
         try:
             progress.update(task, description="[cyan]Memverifikasi peramban & tab Google Flow...")
             generator = ImageGenerator()
-            generator.ensure_browser(headless=headless)
+            generator.ensure_browser()
             generator.connect()
-
-            existing = {
-                str(f.resolve())
-                for f in list(generator.download_dir.glob("*.jpg")) + list(generator.download_dir.glob("*.jpeg"))
-            }
             generator.find_flow_tab()
 
-            progress.update(task, description="[cyan]Mengirim prompt secara senyap (ProseMirror DOM)...")
-            initial_state = generator.submit_prompt(prompt)
+            success = False
+            last_err = None
 
-            progress.update(task, description="[gold]Menunggu render gambar selesai di latar belakang...")
-            generator.hover_and_wait_tile(
-                initial_state=initial_state,
-                timeout=timeout,
-                progress_callback=lambda p: progress.update(
-                    task, description=f"[gold]Menunggu render gambar selesai ({p}%)...[/gold]"
-                ),
-            )
+            for attempt in range(1, max_retries + 1):
+                try:
+                    generator.clean_failed_tiles()
 
-            progress.update(task, description="[cyan]Mengeklik hotbar opsi & memicu unduhan 1K...")
-            generator.click_hotbar_and_download()
+                    existing = {
+                        str(f.resolve())
+                        for f in list(generator.download_dir.glob("*.jpg")) + list(generator.download_dir.glob("*.jpeg"))
+                    }
 
-            progress.update(task, description="[cyan]Menunggu file .jpg di folder unduhan...")
-            downloaded = generator.wait_for_downloaded_file(existing_files=existing, timeout=60)
+                    if attempt > 1:
+                        progress.update(
+                            task,
+                            description=f"[cyan]Mengulang input prompt (Percobaan {attempt}/{max_retries})...[/cyan]",
+                        )
+                    else:
+                        progress.update(task, description="[cyan]Mengirim prompt secara senyap (ProseMirror DOM)...")
 
-            progress.update(task, description="[cyan]Memindahkan file gambar ke lokasi tujuan...")
-            if output_dest is None:
-                dest_dir = generator.workspace_dir / "outputs"
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                slug = re.sub(r"[^\w\s-]", "", prompt)[:30].strip().replace(" ", "_")
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                target_file = dest_dir / f"{slug}_{timestamp}.jpg"
-            else:
-                target_path = Path(output_dest).resolve()
-                if target_path.is_dir() or (not target_path.suffix and not target_path.exists()):
-                    target_path.mkdir(parents=True, exist_ok=True)
-                    slug = re.sub(r"[^\w\s-]", "", prompt)[:30].strip().replace(" ", "_")
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    target_file = target_path / f"{slug}_{timestamp}.jpg"
-                else:
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                    target_file = target_path
+                    initial_state = generator.submit_prompt(prompt)
 
-            shutil.move(str(downloaded), str(target_file))
+                    progress.update(
+                        task,
+                        description=f"[gold]Menunggu render gambar (Percobaan {attempt}/{max_retries})...[/gold]",
+                    )
+                    generator.hover_and_wait_tile(
+                        initial_state=initial_state,
+                        timeout=timeout,
+                        progress_callback=lambda p: progress.update(
+                            task,
+                            description=f"[gold]Menunggu render gambar selesai ({p}% - Percobaan {attempt}/{max_retries})...[/gold]",
+                        ),
+                    )
 
-            progress.update(task, description="[cyan]Menghapus gambar dari kanvas peramban (Pindahkan ke sampah)...")
-            try:
-                generator.delete_current_tile()
-            except Exception as del_err:
-                console.print(f"[warning]⚠ Catatan pembersihan: {del_err}[/warning]")
+                    progress.update(task, description="[cyan]Mengeklik hotbar opsi & memicu unduhan 1K...")
+                    generator.click_hotbar_and_download()
 
-            generator.close()
+                    progress.update(task, description="[cyan]Menunggu file .jpg di folder unduhan...")
+                    downloaded = generator.wait_for_downloaded_file(existing_files=existing, timeout=60)
+
+                    progress.update(task, description="[cyan]Memindahkan file gambar ke lokasi tujuan...")
+                    if output_dest is None:
+                        dest_dir = generator.workspace_dir / "outputs"
+                        dest_dir.mkdir(parents=True, exist_ok=True)
+                        slug = re.sub(r"[^\w\s-]", "", prompt)[:30].strip().replace(" ", "_")
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        target_file = dest_dir / f"{slug}_{timestamp}.jpg"
+                    else:
+                        target_path = Path(output_dest).resolve()
+                        if target_path.is_dir() or (not target_path.suffix and not target_path.exists()):
+                            target_path.mkdir(parents=True, exist_ok=True)
+                            slug = re.sub(r"[^\w\s-]", "", prompt)[:30].strip().replace(" ", "_")
+                            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                            target_file = target_path / f"{slug}_{timestamp}.jpg"
+                        else:
+                            target_path.parent.mkdir(parents=True, exist_ok=True)
+                            target_file = target_path
+
+                    shutil.move(str(downloaded), str(target_file))
+
+                    progress.update(task, description="[cyan]Menghapus gambar dari kanvas peramban (Pindahkan ke sampah)...")
+                    try:
+                        generator.delete_current_tile()
+                    except Exception as del_err:
+                        console.print(f"[warning]⚠ Catatan pembersihan: {del_err}[/warning]")
+
+                    success = True
+                    successful_attempt = attempt
+                    break
+
+                except (GenerationFailedError, TimeoutError) as attempt_err:
+                    last_err = attempt_err
+                    generator.clean_failed_tiles()
+                    if attempt < max_retries:
+                        progress.update(
+                            task,
+                            description=f"[warning]⚠ Percobaan {attempt}/{max_retries} gagal ({attempt_err}). Mengulang input prompt dalam {retry_delay:.0f}s...[/warning]",
+                        )
+                        time.sleep(retry_delay)
+                    else:
+                        raise RuntimeError(
+                            f"Gagal membuat gambar setelah {max_retries} kali percobaan: {attempt_err}"
+                        )
+
+            if not success:
+                raise RuntimeError(f"Gagal setelah {max_retries} percobaan: {last_err}")
 
         except Exception as e:
             console.print(f"\n[error]✗ Kegagalan Otomasi:[/error] {e}")
             return 1
+        finally:
+            generator.close()
 
     summary_table = Table(box=box.ROUNDED, show_header=True)
     summary_table.add_column("Komponen", style="cyan")
     summary_table.add_column("Status / Lokasi", style="bold")
     summary_table.add_row("Status Generasi", "[bold green]✓ Selesai & Terverifikasi[/bold green]")
     summary_table.add_row("Interupsi Kursor Pengguna", "[bold green]✓ 0% (Kursor Bebas Digunakan)[/bold green]")
-    summary_table.add_row("Mode Tampilan Jendela", "[bold green]✓ Berjalan di Latar Belakang (Minimized)[/bold green]")
+    summary_table.add_row("Mode Tampilan Jendela", "[bold green]✓ 100% Native Headless (Tanpa GUI)[/bold green]")
+    summary_table.add_row("Auto-Retry Penanganan Gagal", f"[bold green]✓ Berhasil pada Percobaan {successful_attempt}/{max_retries}[/bold green]")
     summary_table.add_row("Hotbar & Download 1K", "[bold green]✓ Berhasil Diunduh Resolusi Asli[/bold green]")
     summary_table.add_row("Pembersihan Kanvas", "[bold green]✓ Dipindahkan ke Sampah[/bold green]")
     summary_table.add_row("File Hasil Gambar", f"[bold green]{target_file}[/bold green]")
@@ -1196,6 +1365,7 @@ def main() -> int:
             f"[bold green]BERHASIL MENGHASILKAN & MENGUNDUH GAMBAR SECARA SENYAP![/bold green]\n\n"
             f"[muted]Prompt:[/muted] [gold]{prompt}[/gold]\n"
             f"[muted]Lokasi Berkas:[/muted] [white]{target_file}[/white]\n"
+            f"[muted]Percobaan:[/muted] [green]Berhasil pada percobaan {successful_attempt}/{max_retries}[/green]\n"
             f"[muted]Kursor Mouse:[/muted] [green]Tidak tersentuh sama sekali selama proses berlangsung[/green]",
             box=box.ROUNDED,
             style="color(240)",
