@@ -46,15 +46,31 @@ Dapat dijalankan langsung melalui double-click runner Windows (`run.bat`), baris
 
 ## 🚀 Panduan Penggunaan
 
-### 1. Instalasi Dependensi
-Cukup pasang dua pustaka pendukung minimal:
+### 1. Prasyarat: Pasang & Jalankan Firefox Stealth
+Aplikasi ini berkomunikasi secara senyap dengan peramban Firefox melalui port otomasi Marionette (`127.0.0.1:2828`). Silakan pasang dan jalankan peramban dari repositori pendukung [firefox-stealth-automation](https://github.com/ululazmi18/firefox-stealth-automation) terlebih dahulu:
+
+```powershell
+# 1. Kloning repositori browser stealth di folder berdampingan
+git clone https://github.com/ululazmi18/firefox-stealth-automation.git
+cd firefox-stealth-automation
+
+# 2. Pasang dependensi dan unduh Firefox Portable otomatis
+pip install -r requirements.txt
+python setup_browser.py
+```
+> **Tips:** Buka layanan [Google Flow](https://labs.google/fx/tools/flow) pada peramban tersebut dan pastikan akun Google Anda telah login. Peramban otomatis aktif mendengarkan port `2828`.
+
+---
+
+### 2. Instalasi Dependensi Image Generator
+Buka terminal pada direktori proyek ini (`image-generator`), lalu pasang dependensi minimal:
 ```powershell
 pip install -r requirements.txt
 ```
 
 ---
 
-### 2. Metode Runner Windows (`run.bat`)
+### 3. Metode Runner Windows (`run.bat`)
 Cara termudah bagi pengguna Windows desktop:
 - **Klik Ganda (*Double Click*)** berkas [run.bat](file:///d:/Documents/Image%20Generator/run.bat).
 - Masukkan teks prompt ketika diminta pada tampilan terminal.
@@ -67,7 +83,7 @@ Atau jalankan via PowerShell / Command Prompt dengan argumen langsung:
 
 ---
 
-### 3. Metode Baris Perintah Terminal (CLI)
+### 4. Metode Baris Perintah Terminal (CLI)
 
 Jalankan perintah `python image_generator.py` dengan fleksibilitas opsi penuh:
 
@@ -109,7 +125,7 @@ python image_generator.py -p "elang emas hinggap di dahan pohon pinus" --debug
 
 ---
 
-### 4. Metode Modul Python (*Callable API*)
+### 5. Metode Modul Python (*Callable API*)
 
 Dapat diintegrasikan langsung ke dalam pipeline atau aplikasi Python Anda:
 
