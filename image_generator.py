@@ -125,7 +125,7 @@ class MarionetteDriver:
         except (OSError, socket.timeout):
             return False
 
-    def connect(self, timeout: float = 5.0) -> str:
+    def connect(self, timeout: float = 30.0) -> str:
         """Membuka koneksi soket TCP ke peramban, melakukan handshake, dan membuat sesi baru.
 
         Alur kerja:
@@ -135,7 +135,7 @@ class MarionetteDriver:
         4. Mengatur konteks eksekusi Marionette ke 'content' (halaman web DOM).
 
         Args:
-            timeout (float): Waktu tunggu maksimal koneksi soket dalam detik (default: 5.0).
+            timeout (float): Waktu tunggu maksimal koneksi soket dalam detik (default: 30.0).
 
         Returns:
             str: ID sesi Marionette yang dibuat (session_id).
@@ -145,6 +145,7 @@ class MarionetteDriver:
             RuntimeError: Jika inisialisasi sesi baru ditolak oleh Gecko.
         """
         self.sock = socket.create_connection((self.host, self.port), timeout=timeout)
+        self.sock.settimeout(timeout)
         hs_len = b""
         while True:
             ch = self.sock.recv(1)
@@ -347,6 +348,7 @@ class ImageGenerator:
         self.ff_bin = Path(r"D:\FirefoxPortable\App\Firefox64\firefox.exe")
         self.download_dir = self._detect_download_dir()
         self.driver = MarionetteDriver()
+        self.proc: subprocess.Popen | None = None
 
     def _detect_download_dir(self) -> Path:
         """Mendeteksi direktori unduhan peramban secara otomatis dengan prioritas D:\\Downloads.
@@ -400,10 +402,11 @@ class ImageGenerator:
         required_prefs = [
             'user_pref("marionette.enabled", true);',
             'user_pref("marionette.port", 2828);',
-            'user_pref("marionette.defaultPrefs.enabled", true);',
             'user_pref("dom.webdriver.enabled", false);',
             'user_pref("marionette.actors.enabled", true);',
             'user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);',
+            'user_pref("browser.sessionstore.resume_from_crash", false);',
+            'user_pref("toolkit.startup.max_resumed_crashes", -1);',
         ]
         existing = ""
         if user_js.exists():
@@ -461,7 +464,7 @@ class ImageGenerator:
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = 7
 
-            subprocess.Popen(cmd, env=env, startupinfo=startupinfo)
+            self.proc = subprocess.Popen(cmd, env=env, startupinfo=startupinfo)
 
             opened = False
             for _ in range(30):
@@ -475,7 +478,7 @@ class ImageGenerator:
 
     def connect(self) -> None:
         """Menghubungkan klien soket Marionette ke peramban Firefox."""
-        self.driver.connect(timeout=5.0)
+        self.driver.connect(timeout=30.0)
 
     def find_flow_tab(self) -> str:
         """Mencari dan beralih ke tab Google Flow aktif, atau mengarahkan tab ke proyek Flow.
@@ -598,7 +601,13 @@ class ImageGenerator:
 
         return { success: true };
         """
-        res_in = self.driver.execute_script(input_script, [prompt_text])
+        res_in = None
+        for _ in range(40):
+            res_in = self.driver.execute_script(input_script, [prompt_text])
+            if isinstance(res_in, dict) and res_in.get("success"):
+                break
+            time.sleep(0.5)
+
         if not isinstance(res_in, dict) or not res_in.get("success"):
             raise RuntimeError(f"Gagal memasukkan teks prompt: {res_in}")
 
@@ -856,8 +865,37 @@ class ImageGenerator:
         return True
 
     def close(self) -> None:
-        """Menutup koneksi soket Marionette pengontrol."""
+        """Menutup koneksi soket Marionette dan menghentikan proses peramban latar belakang jika dibuat oleh skrip.
+
+        Jika instance Firefox diluncurkan secara otomatis oleh skrip ini (bukan dibuka manual oleh pengguna),
+        metode ini akan menghentikan proses peramban tersebut secara bersih untuk melepaskan penguncian
+        profil ('parent.lock') dan membebaskan memori RAM sistem.
+        """
         self.driver.close()
+        if self.proc is not None:
+            try:
+                subprocess.run(
+                    ["taskkill", "/f", "/t", "/pid", str(self.proc.pid)],
+                    capture_output=True,
+                    timeout=5,
+                )
+            except Exception:
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+            self.proc = None
+
+            # Pastikan file lock usang terhapus seketika
+            lock_file = self.profile_dir / "parent.lock"
+            for _ in range(10):
+                if not lock_file.exists():
+                    break
+                try:
+                    lock_file.unlink(missing_ok=True)
+                    break
+                except Exception:
+                    time.sleep(0.2)
 
 
 # ==============================================================================
