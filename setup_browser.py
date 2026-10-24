@@ -175,6 +175,11 @@ user_pref("dom.webdriver.enabled", false);
 user_pref("toolkit.telemetry.enabled", false);
 user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);
 user_pref("browser.sessionstore.resume_from_crash", false);
+
+// HARDENING WEBRTC & PRIVASI JARINGAN (ITERASI 2)
+user_pref("media.peerconnection.enabled", false);
+user_pref("media.peerconnection.ice.no_host", true);
+user_pref("media.peerconnection.ice.default_address_only", true);
 """
     if not user_js.exists():
         user_js.write_text(base_prefs, encoding="utf-8")

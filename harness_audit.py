@@ -477,8 +477,16 @@ class AuditHarness:
                 if "bot terdeteksi" in body_text.lower() or "bot detected" in body_text.lower():
                     failed_signals.append("BrowserScan: Bot terdeteksi")
                     result["score"] = "BOT DETECTED"
+            elif site_id == "browserleaks_webrtc":
+                webrtc_check = self.driver.execute_script("""
+                return {
+                    hasRTC: typeof window.RTCPeerConnection !== 'undefined'
+                };
+                """) or {}
+                if not webrtc_check.get("hasRTC"):
+                    result["score"] = "WebRTC Disabled (No Leak)"
                 else:
-                    result["score"] = "Inspeksi Visual Screenshot"
+                    result["score"] = "WebRTC Enabled"
 
             else:
                 result["score"] = "Inspeksi Visual Screenshot"
