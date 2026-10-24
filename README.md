@@ -44,9 +44,25 @@ Dapat dijalankan langsung melalui double-click runner Windows (`run.bat`), baris
 
 ---
 
-## 🚀 Panduan Instalasi & Penggunaan Langkah demi Langkah
+## ⚡ Instalasi Cepat Otomatis (1 Baris Perintah PowerShell)
 
-Ikuti urutan tahapan di bawah ini untuk menyiapkan lingkungan kerja dari awal hingga siap menghasilkan gambar secara mandiri:
+Cukup buka terminal PowerShell di direktori mana pun yang Anda inginkan, lalu salin dan jalankan **1 baris perintah** berikut:
+
+```powershell
+irm https://raw.githubusercontent.com/ululazmi18/image-generator/main/install.ps1 | iex
+```
+> **Apa yang dilakukan skrip otomatis ini?**
+> 1. Memeriksa ketersediaan **Python**, **Git**, dan **7-Zip** (otomatis memasangnya via winget jika belum ada).
+> 2. Mengkloning repositori `image-generator`.
+> 3. Memasang seluruh pustaka Python (`requirements.txt`).
+> 4. Mengunduh dan mengonfigurasi **Firefox Portable** serta profil stealth anti-deteksi bot.
+> 5. Membuka jendela login akun Google Flow sekali saja, dan generator langsung siap pakai!
+
+---
+
+## 🛠️ Panduan Instalasi Manual Langkah demi Langkah (Alternatif)
+
+Jika Anda ingin menyiapkan lingkungan kerja secara bertahap secara manual:
 
 ### Langkah 1: Kloning Repositori Image Generator & Pasang Dependensi
 Buka terminal PowerShell pada direktori kerja Anda (misal `C:\Users\...\Documents`), lalu kloning dan pasang dependensinya:
