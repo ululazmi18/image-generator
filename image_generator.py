@@ -39,7 +39,9 @@ import subprocess
 import sys
 import time
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 # Standar encoding UTF-8 untuk terminal Windows
 try:
@@ -47,6 +49,25 @@ try:
     sys.stderr.reconfigure(encoding="utf-8")
 except Exception:
     pass
+
+__all__ = [
+    "ImageGenerator",
+    "generate_image",
+    "generate",
+    "GenerationConfig",
+    "GenerationResult",
+    "GenerationFailedError",
+    "AVAILABLE_MODELS",
+    "AVAILABLE_ASPECT_RATIOS",
+    "AVAILABLE_COUNTS",
+    "DEFAULT_MODEL",
+    "DEFAULT_ASPECT_RATIO",
+    "DEFAULT_COUNT",
+    "normalize_model",
+    "normalize_aspect_ratio",
+    "normalize_count",
+]
+
 
 from rich import box
 from rich.console import Console
@@ -75,6 +96,193 @@ console = Console(theme=CUSTOM_THEME)
 # ==============================================================================
 FLOW_PROJECT_URL = "https://flow.google.com/project/d2653e23-18ab-4dda-b15b-3a77cf1085dd"
 FLOW_HOME_URL = "https://flow.google.com/"
+
+
+# ==============================================================================
+# KONFIGURASI & STANDARISASI SETELAN PEMBUATAN GAMBAR (GENERATION SETTINGS)
+# ==============================================================================
+AspectRatioType = Literal["16:9", "4:3", "1:1", "3:4", "9:16"]
+ModelType = Literal["Nano Banana Pro", "Nano Banana 2 Lite", "Nano Banana 2.1"]
+CountType = Literal[1, 2, 3, 4, "x1", "x2", "x3", "x4"]
+
+DEFAULT_MODEL: str = "Nano Banana Pro"
+DEFAULT_ASPECT_RATIO: str = "16:9"
+DEFAULT_COUNT: int = 1
+
+AVAILABLE_MODELS: list[str] = [
+    "Nano Banana Pro",
+    "Nano Banana 2 Lite",
+    "Nano Banana 2.1",
+]
+
+AVAILABLE_ASPECT_RATIOS: list[str] = [
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16",
+]
+
+AVAILABLE_COUNTS: list[int] = [1, 2, 3, 4]
+
+# Pemetaan alias percakapan/fleksibel ke nama model resmi Google Flow
+MODEL_ALIASES: dict[str, str] = {
+    "pro": "Nano Banana Pro",
+    "banana pro": "Nano Banana Pro",
+    "nano banana pro": "Nano Banana Pro",
+    "lite": "Nano Banana 2 Lite",
+    "2 lite": "Nano Banana 2 Lite",
+    "banana lite": "Nano Banana 2 Lite",
+    "banana 2 lite": "Nano Banana 2 Lite",
+    "nano banana 2 lite": "Nano Banana 2 Lite",
+    "2.1": "Nano Banana 2.1",
+    "banana 2.1": "Nano Banana 2.1",
+    "nano banana 2.1": "Nano Banana 2.1",
+}
+
+# Pemetaan alias rasio ke format standar kanonikal
+RATIO_ALIASES: dict[str, str] = {
+    "16:9": "16:9",
+    "16/9": "16:9",
+    "16-9": "16:9",
+    "landscape": "16:9",
+    "wide": "16:9",
+    "horizontal": "16:9",
+    "4:3": "4:3",
+    "4/3": "4:3",
+    "4-3": "4:3",
+    "standard": "4:3",
+    "1:1": "1:1",
+    "1/1": "1:1",
+    "1-1": "1:1",
+    "square": "1:1",
+    "kotak": "1:1",
+    "persegi": "1:1",
+    "3:4": "3:4",
+    "3/4": "3:4",
+    "3-4": "3:4",
+    "portrait": "3:4",
+    "9:16": "9:16",
+    "9/16": "9:16",
+    "9-16": "9:16",
+    "vertical": "9:16",
+    "story": "9:16",
+    "reel": "9:16",
+    "shorts": "9:16",
+    "tiktok": "9:16",
+}
+
+# Pemetaan nama icon Angular Material pada chip ringkasan setelan
+RATIO_ICON_MAP: dict[str, str] = {
+    "16:9": "crop_16_9",
+    "4:3": "crop_landscape",
+    "1:1": "crop_square",
+    "3:4": "crop_portrait",
+    "9:16": "crop_9_16",
+}
+
+
+def normalize_model(val: str | None) -> str:
+    """Menormalkan input nama model AI ke format kanonikal resmi Google Flow.
+
+    Mendukung variasi penulisan seperti 'pro', 'lite', '2.1', 'Nano Banana Pro', dll.
+
+    Args:
+        val (str | None): Input nama model.
+
+    Returns:
+        str: Nama model kanonikal resmi Google Flow.
+    """
+    if not val:
+        return DEFAULT_MODEL
+    clean = str(val).strip().lower()
+    if clean in MODEL_ALIASES:
+        return MODEL_ALIASES[clean]
+    for m in AVAILABLE_MODELS:
+        if clean in m.lower():
+            return m
+    return DEFAULT_MODEL
+
+
+def normalize_aspect_ratio(val: str | None) -> str:
+    """Menormalkan input aspek rasio gambar ke format standar kanonikal Google Flow.
+
+    Mendukung variasi seperti '16:9', '1:1', 'square', 'vertical', 'shorts', 'landscape', dll.
+
+    Args:
+        val (str | None): Input nilai rasio.
+
+    Returns:
+        str: Nilai rasio standar ('16:9', '4:3', '1:1', '3:4', '9:16').
+    """
+    if not val:
+        return DEFAULT_ASPECT_RATIO
+    clean = str(val).strip().lower()
+    if clean in RATIO_ALIASES:
+        return RATIO_ALIASES[clean]
+    for r in AVAILABLE_ASPECT_RATIOS:
+        if clean == r:
+            return r
+    return DEFAULT_ASPECT_RATIO
+
+
+def normalize_count(val: int | str | None) -> str:
+    """Menormalkan input jumlah variasi gambar per generasi ke format string ('x1', 'x2', 'x3', 'x4').
+
+    Args:
+        val (int | str | None): Jumlah gambar (1, 2, 3, 4 atau 'x1', 'x2', dst).
+
+    Returns:
+        str: Format string kuantitas resmi ('x1', 'x2', 'x3', 'x4').
+    """
+    if not val:
+        return f"x{DEFAULT_COUNT}"
+    s = str(val).strip().lower()
+    if s in ("1", "x1"):
+        return "x1"
+    elif s in ("2", "x2"):
+        return "x2"
+    elif s in ("3", "x3"):
+        return "x3"
+    elif s in ("4", "x4"):
+        return "x4"
+    return f"x{DEFAULT_COUNT}"
+
+
+@dataclass
+class GenerationConfig:
+    """Objek konfigurasi parameter pembuatan gambar untuk layanan modul Python."""
+
+    model: str = DEFAULT_MODEL
+    aspect_ratio: str = DEFAULT_ASPECT_RATIO
+    count: int = DEFAULT_COUNT
+
+    def normalized(self) -> tuple[str, str, str]:
+        """Mengembalikan tuple ternormalisasi (model_resmi, aspek_rasio, string_kuantitas)."""
+        return (
+            normalize_model(self.model),
+            normalize_aspect_ratio(self.aspect_ratio),
+            normalize_count(self.count),
+        )
+
+
+@dataclass
+class GenerationResult:
+    """Hasil keluaran proses pembuatan gambar lengkap dengan metadata teknis."""
+
+    file_path: Path
+    prompt: str
+    model: str
+    aspect_ratio: str
+    count: str
+    attempt: int
+    duration_seconds: float
+
+    def __str__(self) -> str:
+        return str(self.file_path)
+
+    def __fspath__(self) -> str:
+        return str(self.file_path)
 
 
 # ==============================================================================
@@ -387,18 +595,32 @@ class ImageGenerator:
         driver (MarionetteDriver): Klien soket Marionette internal.
     """
 
-    def __init__(self, workspace_dir: Path | None = None, debug: bool = False):
+    def __init__(
+        self,
+        workspace_dir: Path | None = None,
+        model: str = DEFAULT_MODEL,
+        aspect_ratio: str = DEFAULT_ASPECT_RATIO,
+        count: int | str = DEFAULT_COUNT,
+        debug: bool = False,
+    ):
         """Menginisialisasi konfigurasi pengontrol ImageGenerator.
 
         Args:
             workspace_dir (Path | None): Direktori workspace root. Jika None, otomatis
                                          menggunakan direktori tempat skrip ini berada.
+            model (str): Nama rangkaian model AI (default: 'Nano Banana Pro').
+            aspect_ratio (str): Aspek rasio gambar ('16:9', '4:3', '1:1', '3:4', '9:16').
+            count (int | str): Kuantitas variasi gambar per generasi (1, 2, 3, 4 atau 'x1', 'x2', dst).
             debug (bool): Mengaktifkan mode debug dengan dokumentasi tangkapan layar visual (default: False).
         """
         if workspace_dir is None:
             self.workspace_dir = Path(__file__).resolve().parent
         else:
             self.workspace_dir = Path(workspace_dir).resolve()
+
+        self.model = normalize_model(model)
+        self.aspect_ratio = normalize_aspect_ratio(aspect_ratio)
+        self.count_str = normalize_count(count)
 
         self.profile_dir = self.workspace_dir / "browser_profile"
         self.ff_bin = Path(r"D:\FirefoxPortable\App\Firefox64\firefox.exe")
@@ -905,29 +1127,56 @@ class ImageGenerator:
 
     def configure_generation_settings(
         self,
-        model_name: str = "Nano Banana Pro",
-        count_str: str = "x1",
+        model_name: str | None = None,
+        aspect_ratio: str | None = None,
+        count_str: str | None = None,
     ) -> bool:
-        """Mengonfigurasi setelan generasi ke mode Gambar, model Banana Pro, dan kuantitas 1x.
+        """Mengonfigurasi setelan model AI, aspek rasio, dan jumlah variasi di kanvas Google Flow.
+
+        Navigasi dilakukan secara senyap melalui Angular Material toggle dan overlay menu:
+        1. Memeriksa apakah chip ringkasan setelan di luar sudah sesuai dengan target.
+        2. Jika belum, membuka panel setelan prompt box (`flow-prompt-box-settings`).
+        3. Memastikan tab mode 'Gambar' aktif.
+        4. Memilih tombol aspek rasio target ('16:9', '4:3', '1:1', '3:4', '9:16').
+        5. Memilih tombol kuantitas variasi target ('x1', 'x2', 'x3', 'x4').
+        6. Jika model target berbeda, membuka dropdown model dan memilih model yang diminta.
+        7. Menutup panel setelan dan mencetak status ringkasan akhir.
 
         Args:
-            model_name (str): Nama model AI yang dipilih (default: 'Nano Banana Pro').
-            count_str (str): Jumlah variasi gambar per generasi (default: 'x1').
+            model_name (str | None): Nama model AI yang dipilih (default: self.model).
+            aspect_ratio (str | None): Nilai aspek rasio kanvas (default: self.aspect_ratio).
+            count_str (str | None): Kuantitas variasi gambar per generasi (default: self.count_str).
 
         Returns:
             bool: True jika setelan berhasil diterapkan atau sudah sesuai.
         """
+        target_model = normalize_model(model_name or self.model)
+        target_ratio = normalize_aspect_ratio(aspect_ratio or self.aspect_ratio)
+        target_count = normalize_count(count_str or self.count_str)
+        target_icon = RATIO_ICON_MAP.get(target_ratio, "crop_16_9")
+
+        # Sinkronkan kembali nilai atribut instance
+        self.model = target_model
+        self.aspect_ratio = target_ratio
+        self.count_str = target_count
+
         config_script = """
         const targetModel = arguments[0];
-        const targetCount = arguments[1];
+        const targetRatio = arguments[1];
+        const targetIcon = arguments[2];
+        const targetCount = arguments[3];
 
-        // 1. Cek apakah ringkasan chip setelan sudah sesuai
+        // 1. Cek apakah ringkasan chip setelan sudah sesuai persis
         const summaryEl = document.querySelector('button.settings-trigger-button .settings-summary') ||
                           document.querySelector('button.settings-trigger-button');
         const summaryText = summaryEl ? (summaryEl.textContent || '') : '';
 
-        if (summaryText.includes(targetModel) && summaryText.includes(targetCount)) {
-            return { status: 'already_configured', summary: summaryText };
+        const hasModel = summaryText.includes(targetModel);
+        const hasCount = summaryText.includes(targetCount);
+        const hasRatio = summaryText.includes(targetIcon) || summaryText.includes(targetRatio);
+
+        if (hasModel && hasCount && hasRatio) {
+            return { status: 'already_configured', summary: summaryText.trim() };
         }
 
         // 2. Buka panel setelan jika belum terbuka
@@ -945,56 +1194,96 @@ class ImageGenerator:
 
         step2_script = """
         const targetModel = arguments[0];
-        const targetCount = arguments[1];
+        const targetRatio = arguments[1];
+        const targetCount = arguments[2];
 
-        // Pastikan tab "Gambar" aktif
-        const toggles = document.querySelectorAll('flow-prompt-box-settings mat-button-toggle, mat-button-toggle');
-        for (const t of toggles) {
-            if ((t.textContent || '').includes('Gambar') && !t.classList.contains('mat-button-toggle-checked')) {
-                const btn = t.querySelector('button');
-                if (btn) btn.click();
-            }
+        const panel = document.querySelector('flow-prompt-box-settings');
+        if (!panel) return { error: 'Panel tidak ditemukan' };
+
+        const toggles = Array.from(panel.querySelectorAll('mat-button-toggle'));
+
+        // A. Pastikan tab "Gambar" aktif
+        const imgToggle = toggles.find(t => (t.textContent || '').includes('Gambar'));
+        if (imgToggle && !imgToggle.classList.contains('mat-button-toggle-checked')) {
+            const btn = imgToggle.querySelector('button') || imgToggle;
+            btn.click();
         }
 
-        // Pilih Model Banana Pro jika belum
-        const modelBtn = document.querySelector('flow-prompt-box-settings button[aria-label="Pilih rangkaian model"], button[aria-label="Pilih rangkaian model"]');
-        if (modelBtn && !(modelBtn.textContent || '').includes('Banana Pro')) {
+        // B. Atur Aspek Rasio (16:9, 4:3, 1:1, 3:4, 9:16)
+        const ratioToggle = toggles.find(t => (t.textContent || '').includes(targetRatio));
+        if (ratioToggle && !ratioToggle.classList.contains('mat-button-toggle-checked')) {
+            const btn = ratioToggle.querySelector('button') || ratioToggle;
+            btn.click();
+        }
+
+        // C. Atur Kuantitas Gambar (x1, x2, x3, x4)
+        const countToggle = toggles.find(t => (t.textContent || '').trim() === targetCount);
+        if (countToggle && !countToggle.classList.contains('mat-button-toggle-checked')) {
+            const btn = countToggle.querySelector('button') || countToggle;
+            btn.click();
+        }
+
+        // D. Periksa apakah model berbeda
+        const modelBtn = panel.querySelector('button[aria-label="Pilih rangkaian model"]') ||
+                         Array.from(panel.querySelectorAll('button')).find(b => (b.textContent || '').includes('Banana'));
+        let needModelMenu = false;
+        if (modelBtn && !(modelBtn.textContent || '').includes(targetModel)) {
             modelBtn.click();
-            const items = document.querySelectorAll('.mat-mdc-menu-panel [role="menuitem"], .mat-mdc-menu-item');
-            for (const item of items) {
-                if ((item.textContent || '').includes('Banana Pro') || (item.textContent || '').includes(targetModel)) {
-                    item.click();
-                    break;
-                }
-            }
+            needModelMenu = true;
         }
 
-        // Pilih Jumlah Generasi (x1)
-        const countToggles = document.querySelectorAll('flow-prompt-box-settings mat-button-toggle, mat-button-toggle');
-        for (const t of countToggles) {
-            const text = (t.textContent || '').trim();
-            if (text === targetCount && !t.classList.contains('mat-button-toggle-checked')) {
-                const btn = t.querySelector('button');
-                if (btn) btn.click();
-            }
-        }
+        return { needModelMenu: needModelMenu };
+        """
 
-        // Tutup panel setelan
-        document.body.click();
-        return { status: 'configured' };
+        step3_script = """
+        const targetModel = arguments[0];
+        const items = Array.from(document.querySelectorAll('.cdk-overlay-container [role="menuitem"], .mat-mdc-menu-item'));
+        const targetItem = items.find(it => (it.textContent || '').includes(targetModel));
+        if (targetItem) {
+            targetItem.click();
+            return { clicked: true, itemText: targetItem.textContent.trim() };
+        }
+        return { clicked: false };
+        """
+
+        close_script = """
+        const panel = document.querySelector('flow-prompt-box-settings');
+        if (panel) {
+            const trigger = document.querySelector('button.settings-trigger-button');
+            if (trigger) trigger.click();
+            else document.body.click();
+        }
+        const summary = (document.querySelector('button.settings-trigger-button') || {}).textContent || '';
+        return { summary: summary.trim() };
         """
 
         try:
-            res1 = self.driver.execute_script(config_script, [model_name, count_str])
+            res1 = self.driver.execute_script(config_script, [target_model, target_ratio, target_icon, target_count])
             if isinstance(res1, dict) and res1.get("status") == "already_configured":
+                console.print(
+                    f"[success]✓ Setelan aktif:[/success] [cyan]{target_model}[/cyan] | "
+                    f"Rasio: [cyan]{target_ratio}[/cyan] | Kuantitas: [cyan]{target_count}[/cyan]"
+                )
                 return True
 
+            time.sleep(0.6)
+            res2 = self.driver.execute_script(step2_script, [target_model, target_ratio, target_count])
             time.sleep(0.5)
-            self.driver.execute_script(step2_script, [model_name, count_str])
-            time.sleep(0.5)
-            console.print(f"[success]✓ Setelan dikonfigurasi:[/success] [cyan]{model_name}[/cyan] ({count_str})")
+
+            if isinstance(res2, dict) and res2.get("needModelMenu"):
+                self.driver.execute_script(step3_script, [target_model])
+                time.sleep(0.5)
+
+            final_res = self.driver.execute_script(close_script)
+            final_summary = final_res.get("summary") if isinstance(final_res, dict) else ""
+            console.print(
+                f"[success]✓ Setelan dikonfigurasi:[/success] [cyan]{target_model}[/cyan] | "
+                f"Rasio: [cyan]{target_ratio}[/cyan] | Kuantitas: [cyan]{target_count}[/cyan] "
+                f"[dim]({final_summary})[/dim]"
+            )
             return True
-        except Exception:
+        except Exception as e:
+            console.print(f"[warning]⚠ Gagal mengonfigurasi setelan: {e}[/warning]")
             return False
 
     def find_flow_tab(self) -> str:
@@ -1008,7 +1297,8 @@ class ImageGenerator:
         3. Menangani alur login otomatis jika akun belum terhubung.
         4. Masuk ke proyek 'images generator' (atau membuat baru jika belum ada).
         5. Menonaktifkan Mode Agen pada prompt box.
-        6. Mengonfigurasi model ke 'Nano Banana Pro' dan generasi 1x.
+        6. Mengonfigurasi setelan model AI, aspek rasio, dan jumlah variasi.
+        7. Membersihkan seluruh tile lama di kanvas sehingga kanvas kosong sempurna.
 
         Returns:
             str: Identifier handle tab Google Flow yang siap digunakan.
@@ -1067,8 +1357,12 @@ class ImageGenerator:
         # 6. Nonaktifkan mode agen jika sedang aktif pada prompt box kanvas
         self.disable_agent_mode()
 
-        # 7. Konfigurasi setelan model ke Nano Banana Pro (x1)
-        self.configure_generation_settings(model_name="Nano Banana Pro", count_str="x1")
+        # 7. Konfigurasi setelan model, aspek rasio, dan kuantitas variasi
+        self.configure_generation_settings(
+            model_name=self.model,
+            aspect_ratio=self.aspect_ratio,
+            count_str=self.count_str,
+        )
 
         # 8. Bersihkan seluruh tile lama dari kanvas agar kanvas selalu kosong sebelum memulai
         self.delete_all_canvas_tiles()
@@ -1567,11 +1861,14 @@ class ImageGenerator:
 
 
 # ==============================================================================
-# HIGH-LEVEL CALLABLE API FUNCTION (UNTUK DIPANGGIL OLEH SKRIP LAIN)
+# HIGH-LEVEL CALLABLE API FUNCTIONS (UNTUK LAYANAN MODUL PYTHON PROFESIONAL)
 # ==============================================================================
 def generate_image(
     prompt: str,
     output_path: str | Path | None = None,
+    model: str = DEFAULT_MODEL,
+    aspect_ratio: str = DEFAULT_ASPECT_RATIO,
+    count: int | str = DEFAULT_COUNT,
     timeout: int = 180,
     max_retries: int | None = None,
     retry_delay: float = 12.0,
@@ -1585,21 +1882,18 @@ def generate_image(
     dalam mode headless di latar belakang tanpa jendela GUI dan tanpa mengganggu kursor (*zero cursor hijacking*):
     1. Memverifikasi/menjalankan Firefox Portable secara otomatis dalam mode -headless murni.
     2. Mendeteksi tab Google Flow aktif atau mengarahkannya ke proyek.
-    3. Mengisi prompt ke editor ProseMirror dan memicu pembuatan gambar.
-    4. Menunggu hingga generasi selesai (0% -> 100%).
-    5. Mengunduh gambar dalam resolusi asli 1K.
-    6. Memindahkan file gambar dari folder unduhan ke direktori tujuan yang diminta.
-    7. Menghapus tile gambar dari kanvas Google Flow ('Pindahkan ke sampah').
+    3. Mengonfigurasi model AI (Banana Pro/Lite/2.1), aspek rasio (16:9, 1:1, 9:16, dll), dan kuantitas (x1-x4).
+    4. Membersihkan kanvas dari seluruh tile lama agar steril.
+    5. Mengisi prompt ke editor ProseMirror via native keystrokes dan memicu pembuatan gambar.
+    6. Memantau progres hingga generasi selesai (0% -> 100%).
+    7. Mengunduh gambar dalam resolusi asli 1K.
+    8. Memindahkan berkas gambar dari folder unduhan ke direktori tujuan yang diminta.
+    9. Menghapus tile gambar dari kanvas Google Flow ('Pindahkan ke sampah').
 
     Fitur Pemulihan Mandiri Tanpa Batas (Unlimited Self-Healing Auto-Retry):
-    Jika proses render gagal di sisi Google Flow (misal terkena batas penggunaan atau kendala
-    server), fungsi secara otomatis mendeteksi tile gagal, membersihkannya dari kanvas,
-    menunggu jeda cooldown, menyegarkan halaman jika diperlukan, dan terus mencoba ulang
-    tanpa batasan sampai berkas gambar berhasil diperoleh.
-
-    Mode Debug & Dokumentasi Visual:
-    Jika `debug=True`, setiap langkah siklus otomasi akan didokumentasikan dalam format tangkapan
-    layar gambar PNG di dalam folder `debug/` untuk memudahkan audit dan inspeksi visual.
+    Jika proses render gagal di sisi Google Flow (misal terkena batas penggunaan atau kendala server),
+    fungsi secara otomatis mendeteksi tile gagal, membersihkannya dari kanvas, menunggu jeda cooldown,
+    menyegarkan halaman jika diperlukan, dan terus mencoba ulang tanpa batasan sampai berkas gambar berhasil diperoleh.
 
     Args:
         prompt (str): Deskripsi teks gambar yang ingin dibuat.
@@ -1607,12 +1901,17 @@ def generate_image(
             - Jika berupa folder: berkas disimpan dengan format slug prompt dan timestamp.
             - Jika berupa path berkas .jpg: berkas disimpan persis dengan nama tersebut.
             - Jika None: otomatis disimpan di folder 'outputs/' pada root workspace.
+        model (str): Rangkaian model AI (misal: 'Nano Banana Pro', 'Nano Banana 2 Lite', 'Nano Banana 2.1').
+                     Dapat juga menggunakan singkatan: 'pro', 'lite', '2.1'. Default: 'Nano Banana Pro'.
+        aspect_ratio (str): Aspek rasio gambar ('16:9', '4:3', '1:1', '3:4', '9:16' atau alias 'square', 'vertical').
+                            Default: '16:9'.
+        count (int | str): Kuantitas variasi gambar per generasi (1, 2, 3, 4 atau 'x1', 'x2', dst). Default: 1.
         timeout (int): Batas waktu maksimal proses pembuatan gambar per percobaan dalam detik (default: 180).
         max_retries (int | None): Batas maksimal percobaan ulang (default: None, mengulang tanpa batas).
         retry_delay (float): Jeda waktu dalam detik sebelum mengulang percobaan berikutnya (default: 12.0).
         auto_launch (bool): Luncurkan Firefox Portable secara otomatis jika belum berjalan (default: True).
         debug (bool): Aktifkan mode debug untuk mendokumentasikan setiap langkah via tangkapan layar (default: False).
-        **kwargs: Parameter opsional kompatibilitas mundur (misal jika parameter `headless` dioper).
+        **kwargs: Parameter opsional kompatibilitas mundur.
 
     Returns:
         Path: Lokasi absolut berkas gambar .jpg yang berhasil dibuat dan dipindahkan.
@@ -1623,11 +1922,69 @@ def generate_image(
 
     Example:
         >>> from image_generator import generate_image
-        >>> # Simpan otomatis ke folder outputs/ dengan mode debug visual
-        >>> file_path = generate_image("pemandangan danau pegunungan berkabut saat fajar", debug=True)
+        >>> # Generasi vertikal 9:16 untuk Reel / Shorts
+        >>> file_path = generate_image(
+        ...     prompt="astronot melayang di ruang angkasa fajar",
+        ...     aspect_ratio="9:16",
+        ...     model="pro",
+        ...     output_path="hasil/"
+        ... )
         >>> print("Gambar disimpan di:", file_path)
     """
-    generator = ImageGenerator(debug=debug)
+    res = generate(
+        prompt=prompt,
+        output_path=output_path,
+        model=model,
+        aspect_ratio=aspect_ratio,
+        count=count,
+        timeout=timeout,
+        max_retries=max_retries,
+        retry_delay=retry_delay,
+        auto_launch=auto_launch,
+        debug=debug,
+        **kwargs,
+    )
+    return res.file_path
+
+
+def generate(
+    prompt: str,
+    output_path: str | Path | None = None,
+    model: str = DEFAULT_MODEL,
+    aspect_ratio: str = DEFAULT_ASPECT_RATIO,
+    count: int | str = DEFAULT_COUNT,
+    timeout: int = 180,
+    max_retries: int | None = None,
+    retry_delay: float = 12.0,
+    auto_launch: bool = True,
+    debug: bool = False,
+    **kwargs: object,
+) -> GenerationResult:
+    """Layanan modul Python tingkat profesional yang mengembalikan objek `GenerationResult` lengkap.
+
+    Args:
+        prompt (str): Deskripsi teks gambar yang ingin dibuat.
+        output_path (str | Path | None): Jalur folder atau nama file tujuan.
+        model (str): Model AI Google Flow yang dipilih (default: 'Nano Banana Pro').
+        aspect_ratio (str): Aspek rasio kanvas gambar (default: '16:9').
+        count (int | str): Kuantitas variasi gambar per generasi (default: 1).
+        timeout (int): Batas waktu maksimal per percobaan dalam detik (default: 180).
+        max_retries (int | None): Batas percobaan maksimal (default: None, tanpa batas).
+        retry_delay (float): Waktu tunggu antar-percobaan dalam detik (default: 12.0).
+        auto_launch (bool): Luncurkan Firefox Portable headless otomatis jika belum aktif (default: True).
+        debug (bool): Simpan tangkapan layar debug visual (default: False).
+
+    Returns:
+        GenerationResult: Objek terstruktur berisi file_path, prompt, model, aspect_ratio, count,
+                          attempt, dan duration_seconds.
+    """
+    start_ts = time.time()
+    generator = ImageGenerator(
+        model=model,
+        aspect_ratio=aspect_ratio,
+        count=count,
+        debug=debug,
+    )
 
     try:
         generator.ensure_browser(auto_launch=auto_launch)
@@ -1666,6 +2023,7 @@ def generate_image(
                     if d.exists():
                         for f in list(d.glob("*.jpg")) + list(d.glob("*.jpeg")):
                             existing.add(str(f.resolve()))
+
                 initial_state = generator.submit_prompt(prompt)
                 generator.capture_debug_screenshot(
                     f"prompt_submitted_att_{attempt}",
@@ -1713,7 +2071,16 @@ def generate_image(
                 except Exception as del_err:
                     console.print(f"[warning]⚠ Catatan pembersihan: {del_err}[/warning]")
 
-                return target_file
+                duration = time.time() - start_ts
+                return GenerationResult(
+                    file_path=target_file,
+                    prompt=prompt,
+                    model=generator.model,
+                    aspect_ratio=generator.aspect_ratio,
+                    count=generator.count_str,
+                    attempt=attempt,
+                    duration_seconds=duration,
+                )
 
             except (GenerationFailedError, TimeoutError) as attempt_err:
                 last_error = attempt_err
@@ -1737,36 +2104,38 @@ def generate_image(
 # ==============================================================================
 # CLI PARSER & INTERFACE RUNNER
 # ==============================================================================
-def parse_cli_args() -> tuple[str, str | None, int, bool]:
-    """Mengekstrak parameter baris perintah (CLI) dengan dukungan prompt tanpa wajib tanda petik.
-
-    Peramban selalu dijalankan secara 100% otomatis dalam mode native headless di latar belakang,
-    dan memiliki mekanisme auto-retry tanpa batas sampai gambar berhasil dibuat.
+def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool]:
+    """Mengekstrak parameter baris perintah (CLI) untuk prompt, setelan model, rasio, dan kuantitas.
 
     Mendukung opsi:
-    - `--prompt` / `-p`: Teks prompt (seluruh kata setelah opsi ini digabungkan otomatis).
+    - `--prompt` / `-p`: Teks deskripsi prompt.
+    - `--model` / `-m`: Nama model AI ('pro', 'lite', '2.1' atau nama lengkap).
+    - `--aspect-ratio` / `--ar` / `-a` / `--ratio`: Rasio gambar ('16:9', '4:3', '1:1', '3:4', '9:16', 'square', 'vertical').
+    - `--count` / `-c` / `--variations` / `-v`: Kuantitas variasi (1, 2, 3, 4 atau 'x1', 'x2', dst).
     - `--output` / `-o` / `--dest` / `-d`: Folder atau nama berkas tujuan pemindahan.
-    - `--timeout` / `-t`: Batas waktu maksimal generasi per percobaan dalam detik (default: 180).
-    - `--debug`: Mengaktifkan mode debug dengan dokumentasi visual tangkapan layar (.png).
+    - `--timeout` / `-t`: Batas waktu maksimal per percobaan dalam detik (default: 180).
+    - `--debug`: Mengaktifkan mode debug visual dengan dokumentasi tangkapan layar (.png).
 
     Returns:
-        tuple[str, str | None, int, bool]: (prompt_text, output_dest, timeout, debug_enabled)
-
-    Example:
-        `python image_generator.py --prompt pemandangan gunung es -o hasil/ --debug`
-        `run.bat --prompt robot astronot di planet mars --debug`
+        tuple: (prompt, output_dest, model, aspect_ratio, count_str, timeout, debug_enabled)
     """
     args = sys.argv[1:]
     output_flags = ["--output", "-o", "--dest", "-d"]
     timeout_flags = ["--timeout", "-t"]
     retries_flags = ["--retries", "-r"]
     prompt_flags = ["--prompt", "-p"]
+    model_flags = ["--model", "-m"]
+    ratio_flags = ["--aspect-ratio", "--ar", "-a", "--ratio"]
+    count_flags = ["--count", "-c", "--variations", "-v", "--var"]
     headless_flags = ["--headless"]
     debug_flags = ["--debug"]
 
     output_val = None
     timeout_val = 180
     debug_val = False
+    model_val = DEFAULT_MODEL
+    ratio_val = DEFAULT_ASPECT_RATIO
+    count_val = DEFAULT_COUNT
     prompt_tokens = []
 
     # Konsumsi flag --headless jika masih dioper oleh pengguna agar kompatibel
@@ -1783,6 +2152,15 @@ def parse_cli_args() -> tuple[str, str | None, int, bool]:
         if arg in output_flags and i + 1 < len(args):
             output_val = args[i + 1]
             i += 2
+        elif arg in model_flags and i + 1 < len(args):
+            model_val = normalize_model(args[i + 1])
+            i += 2
+        elif arg in ratio_flags and i + 1 < len(args):
+            ratio_val = normalize_aspect_ratio(args[i + 1])
+            i += 2
+        elif arg in count_flags and i + 1 < len(args):
+            count_val = normalize_count(args[i + 1])
+            i += 2
         elif arg in timeout_flags and i + 1 < len(args):
             try:
                 timeout_val = int(args[i + 1])
@@ -1790,13 +2168,21 @@ def parse_cli_args() -> tuple[str, str | None, int, bool]:
                 pass
             i += 2
         elif arg in retries_flags and i + 1 < len(args):
-            # Diabaikan secara anggun jika pengguna lama masih mengetik flag retries
             i += 2
         elif arg in prompt_flags:
             i += 1
             while i < len(args):
                 if args[i] in output_flags:
                     output_val = args[i + 1] if i + 1 < len(args) else None
+                    i += 2
+                elif args[i] in model_flags:
+                    model_val = normalize_model(args[i + 1]) if i + 1 < len(args) else model_val
+                    i += 2
+                elif args[i] in ratio_flags:
+                    ratio_val = normalize_aspect_ratio(args[i + 1]) if i + 1 < len(args) else ratio_val
+                    i += 2
+                elif args[i] in count_flags:
+                    count_val = normalize_count(args[i + 1]) if i + 1 < len(args) else count_val
                     i += 2
                 elif args[i] in timeout_flags:
                     try:
@@ -1805,7 +2191,6 @@ def parse_cli_args() -> tuple[str, str | None, int, bool]:
                         pass
                     i += 2
                 elif args[i] in retries_flags:
-                    # Diabaikan jika ada di tengah token prompt
                     i += 2 if i + 1 < len(args) else 1
                 elif args[i] in debug_flags:
                     debug_val = True
@@ -1819,15 +2204,11 @@ def parse_cli_args() -> tuple[str, str | None, int, bool]:
             i += 1
 
     prompt_str = " ".join(prompt_tokens).strip()
-    return prompt_str, output_val, timeout_val, debug_val
+    return prompt_str, output_val, model_val, ratio_val, normalize_count(count_val), timeout_val, debug_val
 
 
 def main() -> int:
-    """Titik masuk eksekusi utama CLI dengan antarmuka Rich terminal dan auto-retry tanpa batas.
-
-    Returns:
-        int: Kode keluar proses (0 jika sukses, 1 jika terjadi kegagalan).
-    """
+    """Titik masuk eksekusi utama CLI dan runner batch (run.bat) dengan antarmuka Rich terminal."""
     console.clear()
     banner = (
         "[brand]IMAGE GENERATOR — GOOGLE FLOW BOT[/brand] [muted]//[/muted] [gold]SILENT BACKGROUND EDITION[/gold]\n"
@@ -1835,13 +2216,32 @@ def main() -> int:
     )
     console.print(Panel(banner, box=box.ROUNDED, style="color(240)"))
 
-    prompt, output_dest, timeout, debug = parse_cli_args()
+    prompt, output_dest, model, aspect_ratio, count_str, timeout, debug = parse_cli_args()
 
+    # Mode interaktif jika prompt belum diisi via CLI
     if not prompt:
         console.print(
-            "[info]ℹ[/info] [dim]Tips: Jalankan `run.bat --prompt gambar pemandangan -o hasil/` tanpa tanda petik.[/dim]\n"
+            "[info]ℹ[/info] [dim]Tips CLI: Anda dapat memberikan argumen lengkap:\n"
+            "      run.bat --prompt \"pemandangan fajar\" --model pro --ar 9:16 --count 1[/dim]\n"
         )
         prompt = Prompt.ask("[cyan]Masukkan Prompt Generasi Gambar[/cyan]")
+
+        if prompt.strip():
+            change_cfg = Prompt.ask(
+                f"[dim]Gunakan setelan default ([gold]🍌 {model}[/gold] | [magenta]{aspect_ratio}[/magenta] | [green]{count_str}[/green])? [Y/n][/dim]",
+                default="y",
+            )
+            if change_cfg.strip().lower() in ("n", "no", "tidak"):
+                console.print(f"[dim]Pilihan Model: {', '.join(AVAILABLE_MODELS)}[/dim]")
+                m_in = Prompt.ask("[cyan]Pilih Model (pro/lite/2.1)[/cyan]", default=model)
+                model = normalize_model(m_in)
+
+                console.print(f"[dim]Pilihan Rasio: {', '.join(AVAILABLE_ASPECT_RATIOS)}[/dim]")
+                ar_in = Prompt.ask("[cyan]Pilih Aspek Rasio (16:9, 1:1, 9:16, dll)[/cyan]", default=aspect_ratio)
+                aspect_ratio = normalize_aspect_ratio(ar_in)
+
+                c_in = Prompt.ask("[cyan]Pilih Kuantitas Variasi (1/2/3/4)[/cyan]", default="1")
+                count_str = normalize_count(c_in)
 
     if not prompt.strip():
         console.print("[error]✗[/error] Prompt tidak boleh kosong.")
@@ -1853,6 +2253,9 @@ def main() -> int:
     table.add_column("Parameter", style="cyan", width=22)
     table.add_column("Nilai", style="bold white")
     table.add_row("Prompt Teks", f"[gold]{prompt}[/gold]")
+    table.add_row("Model AI", f"[gold]🍌 {model}[/gold]")
+    table.add_row("Aspek Rasio", f"[magenta]{aspect_ratio}[/magenta]")
+    table.add_row("Kuantitas Gambar", f"[green]{count_str}[/green]")
     table.add_row("Metode Eksekusi", "[bold green]100% Silent Background (Zero Cursor Hijacking)[/bold green]")
     table.add_row("Mode Tampilan", "[bold yellow]100% Native Headless (Tanpa GUI)[/bold yellow]")
     table.add_row("Auto-Retry Penanganan", "[bold green]Tanpa Batas (Loop sampai ada hasil)[/bold green]")
@@ -1869,6 +2272,7 @@ def main() -> int:
     target_file = None
     successful_attempt = 1
     retry_delay = 12.0
+    start_main_ts = time.time()
 
     with Progress(
         SpinnerColumn(),
@@ -1880,7 +2284,12 @@ def main() -> int:
 
         try:
             progress.update(task, description="[cyan]Memverifikasi peramban & tab Google Flow...")
-            generator = ImageGenerator(debug=debug)
+            generator = ImageGenerator(
+                model=model,
+                aspect_ratio=aspect_ratio,
+                count=count_str,
+                debug=debug,
+            )
             generator.ensure_browser()
             generator.connect()
             generator.find_flow_tab()
@@ -2009,13 +2418,18 @@ def main() -> int:
         finally:
             generator.close()
 
+    total_duration = time.time() - start_main_ts
     summary_table = Table(box=box.ROUNDED, show_header=True)
     summary_table.add_column("Komponen", style="cyan")
     summary_table.add_column("Status / Lokasi", style="bold")
     summary_table.add_row("Status Generasi", "[bold green]✓ Selesai & Terverifikasi[/bold green]")
+    summary_table.add_row("Model AI Terpilih", f"[bold gold]🍌 {generator.model}[/bold gold]")
+    summary_table.add_row("Aspek Rasio Terpasang", f"[bold magenta]{generator.aspect_ratio}[/bold magenta]")
+    summary_table.add_row("Kuantitas Gambar", f"[bold green]{generator.count_str}[/bold green]")
     summary_table.add_row("Interupsi Kursor Pengguna", "[bold green]✓ 0% (Kursor Bebas Digunakan)[/bold green]")
     summary_table.add_row("Mode Tampilan Jendela", "[bold green]✓ 100% Native Headless (Tanpa GUI)[/bold green]")
     summary_table.add_row("Auto-Retry Penanganan Gagal", f"[bold green]✓ Berhasil pada Percobaan ke-{successful_attempt} (Tanpa Batas)[/bold green]")
+    summary_table.add_row("Total Durasi", f"[bold cyan]{total_duration:.1f} detik[/bold cyan]")
     if debug:
         summary_table.add_row("Dokumentasi Visual Debug", f"[bold magenta]{generator.debug_dir} (Tersimpan format .png)[/bold magenta]")
     summary_table.add_row("Hotbar & Download 1K", "[bold green]✓ Berhasil Diunduh Resolusi Asli[/bold green]")
@@ -2028,8 +2442,11 @@ def main() -> int:
         Panel(
             f"[bold green]BERHASIL MENGHASILKAN & MENGUNDUH GAMBAR SECARA SENYAP![/bold green]\n\n"
             f"[muted]Prompt:[/muted] [gold]{prompt}[/gold]\n"
+            f"[muted]Model:[/muted] [gold]🍌 {generator.model}[/gold]  |  "
+            f"[muted]Rasio:[/muted] [magenta]{generator.aspect_ratio}[/magenta]  |  "
+            f"[muted]Variasi:[/muted] [green]{generator.count_str}[/green]\n"
             f"[muted]Lokasi Berkas:[/muted] [white]{target_file}[/white]\n"
-            f"[muted]Percobaan:[/muted] [green]Berhasil pada percobaan ke-{successful_attempt} (Loop tanpa batas)[/green]\n"
+            f"[muted]Percobaan:[/muted] [green]Berhasil pada percobaan ke-{successful_attempt} ({total_duration:.1f}s)[/green]\n"
             f"[muted]Kursor Mouse:[/muted] [green]Tidak tersentuh sama sekali selama proses berlangsung[/green]"
             f"{debug_extra}",
             box=box.ROUNDED,
@@ -2041,3 +2458,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
