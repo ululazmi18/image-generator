@@ -1209,7 +1209,7 @@ class ImageGenerator:
         tile.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
         tile.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
 
-        const btn = tile.querySelector('flow-image-hotbar button:nth-child(3)');
+        const btn = tile.querySelector('button[aria-label="Opsi lainnya"], flow-image-hotbar button:nth-child(3), flow-image-hotbar button:last-child');
         if (!btn) return { success: false, error: 'Tombol hotbar 3 tidak ditemukan.' };
 
         btn.click();
