@@ -407,6 +407,8 @@ class ImageGenerator:
             'user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);',
             'user_pref("browser.sessionstore.resume_from_crash", false);',
             'user_pref("toolkit.startup.max_resumed_crashes", -1);',
+            'user_pref("browser.startup.page", 3);',
+            'user_pref("browser.startup.homepage", "https://flow.google.com/project/8eed2cd9-e563-46d8-9ad2-395e53901db4");',
         ]
         existing = ""
         if user_js.exists():
