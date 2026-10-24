@@ -630,6 +630,8 @@ class ImageGenerator:
             local_profile = self.workspace_dir / "browser_profile"
             neighbor_profiles = [
                 local_profile,
+                self.workspace_dir / "firefox-stealth-automation" / "browser_profile",
+                self.workspace_dir.parent / "firefox-stealth-automation" / "browser_profile",
                 self.workspace_dir.parent / "browser" / "browser_profile",
                 self.workspace_dir.parent / "browser_profile",
                 Path(r"D:\FirefoxPortable\Data\profile"),
@@ -643,10 +645,12 @@ class ImageGenerator:
         else:
             default_ff = Path(r"D:\FirefoxPortable\App\Firefox64\firefox.exe")
             neighbor_bins = [
-                default_ff,
+                self.workspace_dir / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
+                self.workspace_dir / "firefox-stealth-automation" / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
+                self.workspace_dir.parent / "firefox-stealth-automation" / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
                 self.workspace_dir.parent / "browser" / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
                 self.workspace_dir.parent / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
-                self.workspace_dir / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
+                default_ff,
             ]
             self.ff_bin = next((b for b in neighbor_bins if b.exists()), default_ff)
 
@@ -796,17 +800,17 @@ class ImageGenerator:
                 Panel(
                     "[bold yellow]Port otomasi Marionette (127.0.0.1:2828) belum aktif.[/bold yellow]\n\n"
                     "Repositori [brand]Image Generator[/brand] ini beroperasi sebagai klien generasi gambar yang terkoneksi ke [cyan]Repo Browser[/cyan].\n\n"
-                    "[bold white]Petunjuk Menghubungkan:[/bold white]\n"
-                    "1. Buka dan jalankan peramban dari repositori browser Anda (dengan port Marionette 2828 aktif).\n"
-                    "2. Atau atur variabel lingkungan [cyan]FIREFOX_BIN[/cyan] ke lokasi firefox.exe dan [cyan]BROWSER_PROFILE[/cyan] ke folder profil Anda.\n"
-                    "3. Jalankan kembali perintah ini.",
-                    title="[gold]Menunggu Koneksi Repo Browser[/gold]",
+                    "[bold white]Petunjuk Menyiapkan Peramban:[/bold white]\n"
+                    "1. Buka dan jalankan peramban dari repositori [cyan]firefox-stealth-automation[/cyan] (port 2828 aktif).\n"
+                    "2. Atau salin folder [cyan]browser_profile[/cyan] dan [cyan]firefox_portable[/cyan] ke dalam folder proyek ini.\n"
+                    "3. Atau atur variabel lingkungan [cyan]FIREFOX_BIN[/cyan] dan [cyan]BROWSER_PROFILE[/cyan].",
+                    title="[gold]Menunggu Koneksi Peramban (Port 2828)[/gold]",
                     box=box.ROUNDED,
                 )
             )
             raise RuntimeError(
-                "Port otomasi peramban (2828) belum aktif. "
-                "Silakan jalankan peramban dari repo browser terlebih dahulu."
+                "Port otomasi peramban (2828) belum aktif dan biner Firefox belum ditemukan. "
+                "Silakan jalankan peramban atau salin folder browser_profile & firefox_portable terlebih dahulu."
             )
 
         if self._is_profile_locked():

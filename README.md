@@ -44,47 +44,88 @@ Dapat dijalankan langsung melalui double-click runner Windows (`run.bat`), baris
 
 ---
 
-## 🚀 Panduan Penggunaan
+## 🚀 Panduan Instalasi & Penggunaan Langkah demi Langkah
 
-### 1. Prasyarat: Pasang & Jalankan Firefox Stealth
-Aplikasi ini berkomunikasi secara senyap dengan peramban Firefox melalui port otomasi Marionette (`127.0.0.1:2828`). Silakan pasang dan jalankan peramban dari repositori pendukung [firefox-stealth-automation](https://github.com/ululazmi18/firefox-stealth-automation) terlebih dahulu:
+Ikuti urutan tahapan di bawah ini untuk menyiapkan lingkungan kerja dari awal hingga siap menghasilkan gambar secara mandiri:
 
+### Langkah 1: Kloning Repositori Image Generator & Pasang Dependensi
+Buka terminal PowerShell pada direktori kerja Anda (misal `D:\Documents`), lalu kloning dan pasang dependensinya:
 ```powershell
-# 1. Kloning repositori browser stealth di folder berdampingan
+# 1. Kloning repositori image-generator
+git clone https://github.com/ululazmi18/image-generator.git
+
+# 2. Masuk ke direktori image-generator
+cd image-generator
+
+# 3. Pasang dependensi pustaka Python
+pip install -r requirements.txt
+```
+
+---
+
+### Langkah 2: Kloning & Siapkan Peramban Firefox Stealth
+Di dalam direktori `image-generator`, kloning repositori pendukung [firefox-stealth-automation](https://github.com/ululazmi18/firefox-stealth-automation) untuk mengunduh peramban portabel dan membentuk profil stealth:
+```powershell
+# 1. Kloning repositori browser stealth di dalam folder proyek
 git clone https://github.com/ululazmi18/firefox-stealth-automation.git
+
+# 2. Masuk ke direktori firefox-stealth-automation
 cd firefox-stealth-automation
 
-# 2. Pasang dependensi dan unduh Firefox Portable otomatis
+# 3. Pasang dependensi dan unduh Firefox Portable otomatis
 pip install -r requirements.txt
 python setup_browser.py
 ```
-> **Tips:** Buka layanan [Google Flow](https://labs.google/fx/tools/flow) pada peramban tersebut dan pastikan akun Google Anda telah login. Peramban otomatis aktif mendengarkan port `2828`.
+*Skrip ini secara otomatis mengunduh Firefox Portable Edition resmi serta mengonfigurasi profil `browser_profile` yang telah di-hardening anti-deteksi bot.*
 
 ---
 
-### 2. Instalasi Dependensi Image Generator
-Buka terminal pada direktori proyek ini (`image-generator`), lalu pasang dependensi minimal:
+### Langkah 3: Login Akun Google & Buka Google Flow
+Jalankan peramban sekali secara manual untuk melakukan autentikasi login akun Google Anda:
 ```powershell
-pip install -r requirements.txt
+# Jalankan peramban Firefox menggunakan profil yang telah disiapkan
+.\firefox_portable\App\Firefox64\firefox.exe -profile .\browser_profile\
+```
+1. Pada jendela Firefox yang terbuka, kunjungi situs [Google Flow](https://labs.google/fx/tools/flow).
+2. Lakukan login menggunakan akun Google Anda dan pastikan antarmuka kanvas Google Flow telah siap digunakan.
+3. Setelah login berhasil, **tutup jendela peramban Firefox tersebut** (agar sesi profil tersimpan dan file lock dilepas).
+
+---
+
+### Langkah 4: Salin Folder Profil & Biner ke `image-generator`
+Kembali ke folder utama `image-generator`, lalu salin folder profil dan biner Firefox yang telah siap pakai:
+```powershell
+# 1. Kembali ke direktori utama image-generator
+cd ..
+
+# 2. Salin folder profil browser yang sudah login Google
+Copy-Item -Path ".\firefox-stealth-automation\browser_profile" -Destination ".\" -Recurse -Force
+
+# 3. Salin folder biner Firefox Portable
+Copy-Item -Path ".\firefox-stealth-automation\firefox_portable" -Destination ".\" -Recurse -Force
+```
+> **Proteksi Keamanan Akun:** Folder `browser_profile/` dan `firefox_portable/` sudah otomatis terdaftar di [`.gitignore`](file:///d:/Documents/Image%20Generator/.gitignore). Kredensial, cookies login, maupun file biner peramban tidak akan pernah terdorong (*pushed*) ke repositori publik GitHub.
+
+*(Tips: Setelah disalin, Anda dapat menghapus folder `firefox-stealth-automation` untuk menghemat ruang penyimpanan jika diinginkan).*
+
+---
+
+### Langkah 5: Menjalankan Image Generator (Siap Pakai!)
+Kini `image-generator` telah memiliki peramban mandiri dan siap memproses prompt secara 100% senyap di latar belakang.
+
+Pilih salah satu metode eksekusi berikut:
+
+#### Metode A: Windows Batch Runner (`run.bat`)
+Cara termudah bagi pengguna desktop Windows:
+- **Klik Ganda (*Double Click*)** berkas [run.bat](file:///d:/Documents/Image%20Generator/run.bat), lalu ketik prompt saat diminta di terminal.
+- Atau jalankan langsung via PowerShell dengan parameter bebas:
+```powershell
+.\run.bat -a 16:9 -m pro -p "mobil sport futuristik di tengah kota cyberpunk fajar"
 ```
 
 ---
 
-### 3. Metode Runner Windows (`run.bat`)
-Cara termudah bagi pengguna Windows desktop:
-- **Klik Ganda (*Double Click*)** berkas [run.bat](file:///d:/Documents/Image%20Generator/run.bat).
-- Masukkan teks prompt ketika diminta pada tampilan terminal.
-- Gambar akan otomatis diproses di latar belakang dan disimpan ke folder `outputs/`.
-
-Atau jalankan via PowerShell / Command Prompt dengan argumen langsung:
-```powershell
-.\run.bat -p "mobil sport futuristik di tengah kota cyberpunk fajar" -a 16:9 -m pro
-```
-
----
-
-### 4. Metode Baris Perintah Terminal (CLI)
-
+#### Metode B: Baris Perintah Terminal (CLI Python)
 Jalankan perintah `python image_generator.py` dengan fleksibilitas opsi penuh:
 
 ```powershell
@@ -95,22 +136,22 @@ python image_generator.py --help
 python image_generator.py -p "kucing anggora bermain di taman sakura fajar"
 
 # 3. Kustomisasi Aspek Rasio (16:9, 1:1, 9:16, 4:3, 3:4)
-python image_generator.py -p "secangkir kopi latte art bunga teratai" -a 1:1
+python image_generator.py -a 1:1 -p "secangkir kopi latte art bunga teratai"
 
 # 4. Kustomisasi Model AI (pro, lite, 2.1)
-python image_generator.py -p "istana kristal megah di atas tebing salju" -m pro
+python image_generator.py -m pro -a 16:9 -p "istana kristal megah di atas tebing salju"
 
 # 5. Menghasilkan Beberapa Variasi Sekaligus (1 sampai 4 gambar)
-python image_generator.py -p "robot koki menyiapkan hidangan mewah" -c 2
+python image_generator.py -c 2 -p "robot koki menyiapkan hidangan mewah"
 
 # 6. Menentukan Folder atau Nama Berkas Tujuan (-o / --output)
-python image_generator.py -p "astronot menjelajahi gua kristal merah" -o "outputs/mars.jpg"
+python image_generator.py -o "outputs/mars.jpg" -p "astronot menjelajahi gua kristal merah"
 
-# 7. Mode Audit Visual (--debug)
-python image_generator.py -p "elang emas hinggap di dahan pohon pinus" --debug
+# 7. Mode Audit Visual Screenshot (--debug)
+python image_generator.py --debug -p "elang emas hinggap di dahan pohon pinus"
 ```
 
-#### Tabel Opsi Parameter CLI
+##### Tabel Opsi Parameter CLI
 
 | Opsi Singkat | Opsi Panjang | Nilai Default | Penjelasan |
 | :--- | :--- | :--- | :--- |
@@ -125,7 +166,7 @@ python image_generator.py -p "elang emas hinggap di dahan pohon pinus" --debug
 
 ---
 
-### 5. Metode Modul Python (*Callable API*)
+#### Metode C: Modul Python (*Callable API*)
 
 Dapat diintegrasikan langsung ke dalam pipeline atau aplikasi Python Anda:
 
