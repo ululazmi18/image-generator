@@ -14,6 +14,7 @@ import sys
 import time
 from pathlib import Path
 
+import requests
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
@@ -71,38 +72,39 @@ def download_file(url: str, dest_path: Path) -> bool:
     Returns:
         bool: True jika berhasil diunduh dan ukuran valid.
     """
-    try:
-        from curl_cffi import requests
-    except ImportError:
-        import requests  # type: ignore
-
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = dest_path.with_suffix(".downloading")
 
     console.print(f"[info]ℹ[/info] Menghubungi server CDN: [cyan]{url}[/cyan]")
 
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        )
+    }
+
     try:
-        session = requests.Session()
-        resp = session.get(url, stream=True, impersonate="chrome124", allow_redirects=True, timeout=30)
-        resp.raise_for_status()
+        with requests.get(url, headers=headers, stream=True, allow_redirects=True, timeout=30) as resp:
+            resp.raise_for_status()
+            total_size = int(resp.headers.get("content-length", 0))
 
-        total_size = int(resp.headers.get("content-length", 0))
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[bold blue]{task.description}"),
-            BarColumn(bar_width=40),
-            DownloadColumn(),
-            TransferSpeedColumn(),
-            TimeRemainingColumn(),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Mengunduh Firefox Portable...", total=total_size)
-            with open(temp_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=65536):
-                    if chunk:
-                        f.write(chunk)
-                        progress.update(task, advance=len(chunk))
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[bold blue]{task.description}"),
+                BarColumn(bar_width=40),
+                DownloadColumn(),
+                TransferSpeedColumn(),
+                TimeRemainingColumn(),
+                console=console,
+            ) as progress:
+                task = progress.add_task("Mengunduh Firefox Portable...", total=total_size)
+                with open(temp_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        if chunk:
+                            f.write(chunk)
+                            progress.update(task, advance=len(chunk))
 
         if temp_path.exists() and temp_path.stat().st_size > 10 * 1024 * 1024:
             if dest_path.exists():
