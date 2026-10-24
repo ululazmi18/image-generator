@@ -1,122 +1,197 @@
-# Image Generator — Workspace Environment
+# Google Flow Image Generator 🎨🚀
 
-Lingkungan pengembangan dan otomasi *image generation* berbasis peramban (Google Flow) dengan profil browser terisolasi, berjalan 100% senyap di latar belakang (*silent background*) tanpa mengontrol kursor pengguna (*zero cursor hijacking*).
+> **Autonomous AI Image Generator with Native Headless Gecko Engine, Stealth Bypass, and Full Studio Settings.**  
+> *100% Gratis, Tanpa Kuota Berbayar, Tanpa Mengganggu Kursor Pengguna (Zero Cursor Hijacking).*
 
 ---
 
-## 1. Topologi & Struktur Direktori
+## 🌟 Fitur Unggulan
+
+- 💎 **100% Free & Unlimited:** Memanfaatkan platform Google Flow tanpa memerlukan langganan API berbayar atau kuota kredit.
+- 🥷 **Silent Background & Zero Cursor Hijacking:** Berjalan 100% di latar belakang menggunakan mode `-headless` native Gecko via soket Marionette. Anda bebas mengetik, bekerja, atau bermain game tanpa kursor mouse terganggu.
+- 📐 **Setelan Aspek Rasio Lengkap:** Mendukung 5 rasio native Google Flow:
+  - `16:9` Widescreen Cinematic (`1376 × 768` px)
+  - `4:3` Klasik / Standard Landscape (`1152 × 896` px)
+  - `1:1` Square Persegi (`1024 × 1024` px)
+  - `3:4` Dokumen / Formal Portrait (`896 × 1152` px)
+  - `9:16` Smartphone Vertical / Shorts / Reels / TikTok (`768 × 1376` px)
+- 🧠 **Multi-Model AI Selection:** Pilih model engine: `pro` (Nano Banana Pro), `lite` (Nano Banana 2 Lite), atau `2.1` (Nano Banana 2.1).
+- 🔢 **Variasi Gambar Fleksibel:** Menghasilkan 1 hingga 4 variasi gambar per eksekusi (`x1`, `x2`, `x3`, `x4`).
+- 🛡️ **Self-Healing & Auto-Retry Cerdas:** Mendeteksi kendala jaringan, server error, atau status batas penggunaan harian secara otomatis. Melakukan pembersihan kanvas (*clean slate*), cooldown, dan perulangan mandiri hingga gambar berhasil diunduh.
+- 🧹 **Pembersihan Kanvas Otomatis:** Setelah gambar 1K berhasil disimpan ke direktori lokal, tile kanvas langsung dihapus (*Pindahkan ke sampah*) agar ruang kerja proyek tetap bersih dan ringan.
+- 💻 **Antarmuka Terminal Modern:** Ditenagai oleh Rich Terminal UI lengkap dengan progress spinner, tabel konfigurasi, panel ringkasan, dan menu `--help` yang interaktif.
+- 🔌 **Layanan Modul Python Kelas Perusahaan:** Dapat diimpor langsung (`from image_generator import generate, generate_image`) dengan type hints lengkap dan metadata keluaran `GenerationResult`.
+
+---
+
+## 📂 Struktur Repositori
 
 ```text
 Image Generator/
-├── .agents/
-│   ├── memory/
-│   │   ├── PRD.md             # Blueprint kebutuhan & arsitektur
-│   │   ├── DESIGN.md          # Standar visual terminal & desain
-│   │   ├── task.md            # Status pelacakan tugas implementasi
-│   │   └── memory.db          # Basis data memori SQLite FTS5
-│   └── rules/                 # Aturan proyek termirror dari D:\.agents\rules
-├── browser_profile/           # Direktori profil Firefox Portable terisolasi (diabaikan Git)
-│   ├── open_browser.bat       # Script peluncur utama peramban profil (kelola akun / GUI)
-│   ├── user.js                # Konfigurasi port Marionette (2828) & WebRTC hardening
-│   └── [data profil Firefox]  # Bookmarks, logins, extensions, storage
-├── stealth_addon/             # Native Gecko WebExtension Stealth Bridge (eliminasi webdriver)
-│   ├── manifest.json          # Manifest WebExtension V2
-│   └── stealth.js             # Injeksi exportFunction/cloneInto di Navigator.prototype
-├── image_generator.py         # Modul inti Python & CLI otomasi Google Flow (v2 Silent)
-├── setup_browser.py           # CLI bootstrapper mandiri untuk install Firefox Portable resmi
-├── harness_audit.py           # QA multi-site benchmark audit suite (17 situs deteksi bot)
-├── REPORT.md                  # Laporan teknis final audit & hasil fingerprint hardening
-├── run.bat                    # Runner batch utama Windows (klik ganda atau via CLI)
-├── outputs/                   # Folder hasil unduhan gambar (diabaikan Git)
-├── reports/                   # Laporan run & screenshot evaluasi benchmark (diabaikan Git)
-├── .gitignore                 # Konfigurasi proteksi privasi profil, output, & cache
-└── README.md                  # Panduan pengoperasian modul
+├── .agents/                    # Konfigurasi memori & tata kelola agen AI
+├── browser_profile/            # Direktori profil Firefox Portable terisolasi (diabaikan Git)
+├── debug/                      # Direktori tangkapan layar saat mode --debug aktif
+│   └── .gitkeep
+├── outputs/                    # Direktori penyimpanan hasil gambar yang diunduh
+│   └── .gitkeep
+├── stealth_addon/              # Native WebExtension Stealth Bridge (bypass deteksi bot)
+│   ├── manifest.json           # Manifest WebExtension V2
+│   └── stealth.js              # Injeksi exportFunction/cloneInto Navigator.prototype
+├── image_generator.py          # Modul inti Python & CLI Generator Gambar v1.0
+├── setup_browser.py            # CLI bootstrapper & pengelola login akun Google
+├── run.bat                     # Runner batch Windows (klik ganda atau CLI)
+├── requirements.txt            # Dependensi pustaka Python resmi
+├── LICENSE                     # Lisensi open-source MIT
+├── .gitignore                  # Konfigurasi proteksi privasi profil & artefak
+└── README.md                   # Dokumentasi resmi proyek
 ```
 
 ---
 
-## 2. Cara Menjalankan untuk Pengguna Windows
+## 🚀 Panduan Memulai Cepat (Quick Start)
 
-### A. Melalui Klik Ganda (*Double Click*)
-Cukup klik ganda [run.bat](file:///d:/Documents/Image%20Generator/run.bat).
-Skrip akan menampilkan banner antarmuka, meminta Anda memasukkan teks prompt, lalu memproses pembuatan dan pengunduhan gambar secara senyap di latar belakang tanpa mengganggu kursor atau aktivitas layar Anda.
+### 1. Prasyarat Sistem
+- **Sistem Operasi:** Windows 10/11 (64-bit).
+- **Python:** Versi 3.10 atau yang lebih baru.
+- **Mozilla Firefox Portable:** Diunduh dan dikonfigurasi secara otomatis oleh skrip.
 
-### B. Melalui Terminal / Baris Perintah (CLI)
-Argumen prompt dapat diketik langsung tanpa tanda petik:
+### 2. Instalasi Dependensi
+Buka terminal (Command Prompt / PowerShell) di folder proyek, lalu jalankan:
 
 ```powershell
-# 1. Menghasilkan gambar dengan prompt langsung (100% otomatis headless & retry tanpa batas)
-.\run.bat --prompt pemandangan danau pegunungan saat fajar berkabut
+pip install -r requirements.txt
+```
 
-# 2. Menentukan direktori/nama file tujuan (-o / --output)
-.\run.bat --prompt kucing lucu di taman bunga sakura -o outputs/
+### 3. Setup Browser & Login Akun Google (Sekali Saja)
+Sebelum menjalankan generasi pertama kali, masuk (*login*) ke akun Google Anda pada profil peramban terisolasi:
 
-# 3. Kustomisasi batas waktu per percobaan (timeout dalam detik)
-.\run.bat --timeout 240 --prompt kastil megah fantasi di puncak tebing bersalju
+```powershell
+python setup_browser.py --login
+```
+Peramban Firefox Portable akan terbuka. Silakan login ke akun Google Anda dan pastikan dapat membuka layanan [Google Flow](https://labs.google/fx/tools/flow). Setelah selesai, tutup jendela peramban. Profil dan sesi tersimpan aman secara lokal di folder `browser_profile/` (otomatis diabaikan oleh Git).
 
-# 4. Mode Debug visual (dokumentasi tangkapan layar setiap langkah ke folder debug/)
-.\run.bat --prompt robot astronot di planet mars --debug
+---
+
+## 🎯 Cara Penggunaan
+
+Tersedia 3 cara pemanfaatan sesuai kebutuhan Anda:
+
+### Lini 1: Runner Windows (`run.bat`)
+Cara termudah bagi pengguna desktop:
+1. **Klik ganda (*Double Click*)** berkas [run.bat](file:///d:/Documents/Image%20Generator/run.bat).
+2. Masukkan teks prompt ketika diminta pada antarmuka terminal.
+3. Generator akan bekerja secara otomatis di latar belakang dan menyimpan gambar ke folder `outputs/`.
+
+Atau jalankan `run.bat` melalui terminal dengan argumen langsung:
+```powershell
+.\run.bat -p "lukisan cat minyak pemandangan pegunungan fajar" -a 16:9 -m pro
 ```
 
 ---
 
-## 3. Penggunaan Sebagai Modul Python (*Callable API*)
+### Lini 2: Baris Perintah Terminal (CLI)
 
-Modul [image_generator.py](file:///d:/Documents/Image%20Generator/image_generator.py) memiliki dokumentasi tipe dan docstrings lengkap (*hover tooltip* di editor IDE). Dapat diimpor langsung oleh skrip atau modul lain, dan secara permanen selalu berjalan dalam mode native headless di latar belakang dengan dukungan pemulihan mandiri tanpa batas (*unlimited self-healing auto-retry*):
+Gunakan perintah `python image_generator.py` dengan opsi fleksibel:
+
+```powershell
+# 1. Bantuan Lengkap (Help Menu)
+python image_generator.py --help
+
+# 2. Generasi Standar (Nano Banana Pro, Rasio 16:9, Variasi 1)
+python image_generator.py -p "kucing putih berbulu lebat di taman bunga sakura"
+
+# 3. Kustomisasi Aspek Rasio (16:9, 1:1, 9:16, 4:3, 3:4)
+python image_generator.py -p "cangkir kopi latte art bunga teratai" -a 1:1
+
+# 4. Kustomisasi Model AI (pro, lite, 2.1)
+python image_generator.py -p "mobil sport futuristik di kota neon cyberpunk" -m pro -a 16:9
+
+# 5. Kustomisasi Variasi Gambar (1 sampai 4)
+python image_generator.py -p "kastil fantasi di atas awan senja" -c 2
+
+# 6. Menentukan Folder / Nama File Tujuan (-o / --output)
+python image_generator.py -p "astronot menjelajahi gua kristal mars" -o "outputs/mars_hero.jpg"
+
+# 7. Mode Debug (Menyimpan tangkapan layar setiap fase ke folder debug/)
+python image_generator.py -p "potret close-up burung merak emas" --debug
+```
+
+#### Tabel Opsi CLI
+
+| Opsi Singkat | Opsi Panjang | Nilai Default | Deskripsi |
+| :--- | :--- | :--- | :--- |
+| `-p` | `--prompt` | *None* (Interaktif) | Teks prompt gambar (Bahasa Indonesia / Inggris) |
+| `-m` | `--model` | `pro` | Pilihan model: `pro` (Banana Pro), `lite` (Banana 2 Lite), `2.1` |
+| `-a` | `--aspect-ratio`| `16:9` | Pilihan rasio: `16:9`, `4:3`, `1:1`, `3:4`, `9:16` |
+| `-c` | `--count` | `1` | Jumlah variasi gambar: `1`, `2`, `3`, atau `4` |
+| `-o` | `--output` | `outputs/` | Direktori atau nama berkas tujuan penyimpanan |
+| `-t` | `--timeout` | `180` | Batas waktu tunggu render per percobaan (detik) |
+| | `--headless` | `True` | Berjalan di latar belakang (gunakan `--no-headless` untuk melihat GUI) |
+| | `--debug` | `False` | Simpan visual audit setiap langkah ke folder `debug/` |
+| `-h` | `--help` | | Menampilkan antarmuka bantuan Rich lengkap |
+
+---
+
+### Lini 3: Modul Python (*Callable API*)
+
+Modul [image_generator.py](file:///d:/Documents/Image%20Generator/image_generator.py) dapat diimpor langsung ke dalam proyek Python Anda:
 
 ```python
-from image_generator import generate_image
+from image_generator import generate, generate_image
 
-# 1. Simpan otomatis ke folder default (outputs/) — 100% native headless & auto-retry tanpa batas
-file_gambar = generate_image("pemandangan matahari terbenam di pantai tropis")
-print("Tersimpan di:", file_gambar)
+# -------------------------------------------------------------
+# Contoh 1: generate_image() — Mengembalikan Path berkas lokal
+# -------------------------------------------------------------
+image_path = generate_image(
+    prompt="pemandangan matahari terbenam di pantai tropis dengan siluet kelapa",
+    aspect_ratio="16:9",
+    model="pro",
+    output_path="outputs/sunset.jpg"
+)
+print(f"Gambar berhasil dibuat: {image_path}")
 
-# 2. Kustomisasi folder tujuan dan batas timeout per percobaan
-file_kustom = generate_image(
-    prompt="cyberpunk neon city futuristic car",
-    output_path="D:/Project/assets/hero.jpg",
-    timeout=200,
+# -------------------------------------------------------------
+# Contoh 2: generate() — Mengembalikan objek GenerationResult
+# -------------------------------------------------------------
+result = generate(
+    prompt="robot koki memasak sushi di dapur futuristik",
+    aspect_ratio="1:1",
+    model="pro",
+    count=1,
+    debug=False
 )
 
-# 3. Mengaktifkan mode debug visual (simpan tangkapan layar setiap langkah ke folder debug/)
-file_debug = generate_image(
-    prompt="kastil fantasi di atas awan saat senja",
-    debug=True,
-)
+if result.success:
+    print(f"Status: Sukses ({result.duration_seconds:.1f} detik)")
+    print(f"File: {result.image_path}")
+    print(f"Dimensi/Ukuran: {result.aspect_ratio} ({result.file_size_human})")
+    print(f"Model Engine: {result.model_name}")
+else:
+    print(f"Gagal: {result.error_message}")
 ```
 
 ---
 
-## 4. Keunggulan Arsitektur Silent Background
+## 📊 Matriks Aspek Rasio & Resolusi Google Flow
 
-1. **Auto-Retry Tanpa Batas & Self-Healing:**
-   Google Flow terkadang gagal merender (misal: "Anda telah mencapai batas penggunaan" atau server error). Skrip mendeteksi tile kegagalan secara instan dalam 1–2 detik, membersihkannya dari kanvas, melakukan cooldown dan penyegaran halaman berkala, serta mengulang proses secara mandiri tanpa batasan (*unlimited loop*) sampai berkas gambar 100% berhasil dihasilkan dan diunduh.
-2. **Zero Cursor Hijacking (0% Interupsi Kursor):**
-   Tidak menyentuh mouse kursor fisik Windows, clipboard OS, atau keyboard hardware. Pengguna bebas mengetik, bekerja, atau bermain game tanpa interupsi.
-3. **100% Native Headless Mode:**
-   Peramban Firefox Portable diluncurkan secara permanen dalam mode `-headless` murni di latar belakang tanpa jendela GUI sama sekali di layar, tanpa perlu mengonfigurasi opsi tambahan.
-4. **Stealth DOM & Gecko Bridge:**
-   Injeksi prompt menggunakan ProseMirror DOM event, klik tombol generate menggunakan Gecko C++ native click (`WebDriver:ElementClick`), dan navigasi menu unduhan resolusi 1K menggunakan Angular CDK overlay event.
-5. **Pembersihan Otomatis Kanvas:**
-   Setelah berkas gambar 1K berhasil diunduh dan dipindahkan ke direktori tujuan, gambar di kanvas Google Flow langsung dihapus (**Pindahkan ke sampah**).
-6. **Mode Debug & Dokumentasi Visual Otomatis:**
-   Dapat diaktifkan melalui opsi `--debug` atau parameter `debug=True`. Setiap langkah otomasi (kondisi kanvas awal, pengiriman prompt, visual galat/batas penggunaan, render 100%, pembukaan menu hotbar unduh, hingga pembersihan kanvas) secara otomatis didokumentasikan dalam format gambar `.png` di direktori `debug/` untuk memudahkan audit dan evaluasi visual tanpa membuka jendela peramban.
+| Aspek Rasio | Dimensi Resolusi | Orientasi | Cocok Untuk |
+| :---: | :---: | :---: | :--- |
+| **`16:9`** | `1376 × 768` px | Landscape Widescreen | YouTube Thumbnail, Wallpaper Desktop, Banner Web |
+| **`4:3`** | `1152 × 896` px | Klasik Landscape | Presentasi Slides, Foto Cetak Standar |
+| **`1:1`** | `1024 × 1024` px | Square Persegi | Feed Instagram, Avatar Profil, Logo, Merchandise |
+| **`3:4`** | `896 × 1152` px | Klasik Portrait | Foto Portofolio, Dokumen Vertikal |
+| **`9:16`** | `768 × 1376` px | Vertical Fullscreen | Instagram Stories, TikTok, YouTube Shorts, Reels |
 
 ---
 
-## 5. Bootstrapper CLI & QA Benchmark Audit Suite
+## 🛠️ Keamanan & Privasi
 
-Proyek ini telah dikeraskan (*hardened*) untuk meminimalkan jejak otomasi peramban dan dapat dideploy dari awal di komputer baru mana pun yang meng-clone repositori ini:
+1. **Isolasi Profil Browser:** Seluruh kredensial akun, cookies, dan token otentikasi disimpan di dalam folder lokal `browser_profile/` dan secara tegas dikecualikan oleh [.gitignore](file:///d:/Documents/Image%20Generator/.gitignore).
+2. **Kedaulatan Git:** Repositori ini tidak akan pernah menyertakan kredensial rahasia atau berkas riwayat sesi pribadi Anda.
+3. **Tanpa Telemetri Pihak Ketiga:** Tidak ada pengiriman data ke server luar selain komunikasi langsung ke domain resmi Google.
 
-### A. Bootstrapper Firefox Portable Mandiri
-Unduh dan pasang peramban secara otomatis tanpa antarmuka GUI:
-```powershell
-python setup_browser.py
-```
+---
 
-### B. Audit Jejak Otomasi pada 17 Situs Benchmark
-Jalankan harness pengujian benchmark bot detection dan fingerprinting:
-```powershell
-python harness_audit.py --run-id audit_verifikasi
-```
-Laporan evaluasi perbandingan lengkap dan artefak tangkapan layar full-page `.png` didokumentasikan secara komprehensif pada [REPORT.md](file:///d:/Documents/Image%20Generator/REPORT.md).
+## 📄 Lisensi
+
+Proyek ini dilisensikan di bawah lisensi open-source [MIT License](file:///d:/Documents/Image%20Generator/LICENSE). Bebas digunakan, dimodifikasi, dan didistribusikan untuk keperluan pribadi maupun komersial.

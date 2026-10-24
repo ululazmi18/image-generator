@@ -1,35 +1,64 @@
-# Browser Profile (Sensitive: logins, cookies, history, session)
-browser_profile/
+# ==============================================================================
+# GITIGNORE — GOOGLE FLOW IMAGE GENERATOR
+# ==============================================================================
 
-# Python Cache
+# Browser Profile (CRITICAL SENSITIVE: Google login credentials, cookies, tokens)
+browser_profile/
+*.default-release/
+*.default/
+profile/
+
+# Portable Browser Binaries & Download Packages
+firefox_portable/
+*.paf.exe
+*.installer.exe
+
+# Output & Debug Directories (Preserve folders via .gitkeep)
+outputs/*
+!outputs/.gitkeep
+debug/*
+!debug/.gitkeep
+screenshots/
+reports/
+
+# Dynamic WebExtension Build Artifacts
+stealth_addon/*.xpi
+*.xpi
+
+# Python Bytecode & Virtual Environments
 __pycache__/
 *.py[cod]
 *$py.class
-.pytest_cache/
+*.so
+.Python
+build/
+dist/
+*.egg-info/
 .venv/
 env/
 venv/
+ENV/
 
-# Logs & Temp
+# Logs & Temporary Scratch Files
 *.log
 temp/
 tmp/
 scratch/
 .cache/
 
-# Environment Variables
+# Environment Variables & Secrets
 .env
 .env.local
 .env.*.local
+*.key
+*.pem
 
-# Test Artifacts & Screenshots
-screenshots/
-outputs/
-debug/
-reports/
-deploy_staging/
-
-# Portable Browser Binaries & Downloaders
-firefox_portable/
-*.paf.exe
-*.xpi
+# IDE & Operating System Artifacts
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini

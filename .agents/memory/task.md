@@ -69,3 +69,13 @@
   - [x] Tambahkan docstrings tingkat fungsi/metode lengkap dan mendalam pada `image_generator.py` (penjelasan, cara kerja di balik layar, Args, Returns, Raises, Example)
   - [x] Bersihkan unused imports (`win32con`, `win32gui`) dan selektor yang tidak terpakai
   - [x] Perbarui `README.md` dan sinkronisasi basis data memori AST (agent-memory)
+
+- [x] Persiapan Rilis GitHub v1.0 & Pembersihan Bersih Workspace
+  - [x] Pembersihan total folder dan berkas uji coba (`debug/*.png`, `reports/`, `deploy_staging/`, `REPORT.md`, `harness_audit.py`, `__pycache__/`)
+  - [x] Preservasi struktur direktori bersih via `debug/.gitkeep` dan `outputs/.gitkeep`
+  - [x] Konfigurasi `.gitignore` ketat (proteksi mutlak `browser_profile/`, kredensial, token, dan artefak output)
+  - [x] Pembuatan berkas dependensi resmi `requirements.txt`
+  - [x] Pembuatan berkas lisensi resmi `LICENSE` (MIT)
+  - [x] Penulisan ulang `README.md` komprehensif berstandar kelas dunia (3 lini penggunaan: batch runner, CLI, Python module)
+  - [x] Verifikasi zero-error py_compile dan Rich `--help` interface
+
