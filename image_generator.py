@@ -1,23 +1,32 @@
-"""Image Generator v2 (Silent Background Edition) — Modul & CLI Otomasi Google Flow.
+"""Image Generator (Silent Background Edition) — Modul & CLI Otomasi Google Flow.
+
+Modul otomasi penuh untuk pembuatan dan pengunduhan gambar dari Google Flow secara
+100% senyap di latar belakang (*background*) tanpa memerlukan intervensi pengguna,
+tanpa mengontrol kursor mouse (*zero cursor hijacking*), dan tanpa mencuri fokus jendela.
 
 Fitur Utama:
-1. 100% Senyap & Non-Intrusif: Bebas total dari kontrol mouse fisik Windows,
-   clipboard OS, atau pencurian fokus jendela (zero cursor hijacking).
-2. Berjalan di Latar Belakang (Background / Minimized): Peramban dibuka secara
-   terminimalkan (SW_SHOWMINNOACTIVE) atau mode -headless sehingga pengguna dapat
-   tetap bekerja, mengetik, bermain game, atau beraktivitas tanpa terganggu sedikit pun.
-3. Otomasi Siklus Penuh: Input prompt -> Generate -> Monitor progres -> Unduh 1K ->
-   Pindahkan berkas -> Hapus gambar dari kanvas ('Pindahkan ke sampah').
-4. Callable & CLI: Dapat diimpor sebagai fungsi Python atau dipanggil dari terminal.
+1. Zero Cursor Hijacking:
+   Tidak menggunakan pergerakan mouse kursor fisik Windows, keyboard OS, atau clipboard.
+   Pengguna bebas mengetik, bekerja, atau bermain game tanpa terganggu sedikit pun.
+2. Background & Minimized Mode:
+   Peramban Firefox Portable diluncurkan dalam keadaan terminimalkan (SW_SHOWMINNOACTIVE)
+   atau mode -headless murni sehingga tidak memunculkan jendela yang mengganggu layar.
+3. Otomasi Siklus Penuh:
+   Memasukkan teks prompt -> Memicu pembuatan gambar -> Memantau progres (0%-100%) ->
+   Mengunduh resolusi asli 1K -> Memindahkan berkas ke folder tujuan -> Menghapus tile
+   dari kanvas Google Flow ('Pindahkan ke sampah').
+4. Fleksibel (Callable & CLI):
+   Dapat diimpor sebagai fungsi Python (`from image_generator import generate_image`)
+   atau dijalankan langsung via terminal/CLI (`run.bat --prompt "..."`).
 
-Penggunaan:
-    # Sebagai CLI:
-    python image_generator.py --prompt pemandangan gunung es sinematik -o hasil/
-    python image_generator.py --headless --prompt robot kucing futuristik
+Contoh Penggunaan Singkat:
+    # Sebagai CLI via batch runner:
+    run.bat --prompt pemandangan gunung bersalju saat fajar sinematik -o hasil/
 
     # Sebagai Modul Python:
     from image_generator import generate_image
-    output_path = generate_image("gambar produk estetik", output_path="outputs/")
+    file_hasil = generate_image("kucing lucu di taman bunga", output_path="outputs/")
+    print(f"Gambar tersimpan di: {file_hasil}")
 """
 
 import datetime
@@ -37,9 +46,6 @@ try:
     sys.stderr.reconfigure(encoding="utf-8")
 except Exception:
     pass
-
-import win32con
-import win32gui
 
 from rich import box
 from rich.console import Console
@@ -64,56 +70,37 @@ CUSTOM_THEME = Theme(
 console = Console(theme=CUSTOM_THEME)
 
 # ==============================================================================
-# XPATH & SELECTOR DEFINITIONS DARI SPESIFIKASI & PENGUJIAN EMPIRIS
+# KONFIGURASI URL GOOGLE FLOW
 # ==============================================================================
 FLOW_PROJECT_URL = "https://flow.google.com/project/d2653e23-18ab-4dda-b15b-3a77cf1085dd"
-FLOW_FALLBACK_URL = "https://flow.google.com/project/8eed2cd9-e563-46d8-9ad2-395e53901db4"
-
-XPATH_PROMPT_INPUT = (
-    "/html/body/aisandbox-root/main/flow-project-shell/flow-project-page/div[2]/"
-    "flow-project-sidenav-container/mat-sidenav-container/mat-sidenav-content/div/"
-    "flow-prompt-box/flow-prompt-box-instruction-card-wrapper/div/div/div/"
-    "flow-base-prompt-box/div/div[1]/flow-rich-text-editor/div/div/p"
-)
-
-XPATH_GENERATE_BUTTON = (
-    "/html/body/aisandbox-root/main/flow-project-shell/flow-project-page/div[2]/"
-    "flow-project-sidenav-container/mat-sidenav-container/mat-sidenav-content/div/"
-    "flow-prompt-box/flow-prompt-box-instruction-card-wrapper/div/div/div/"
-    "flow-base-prompt-box/div/div[2]/div/flow-generate-icon-button/button/span[2]"
-)
-
-XPATH_TILE_CONTAINER = (
-    "/html/body/aisandbox-root/main/flow-project-shell/flow-project-page/div/"
-    "flow-project-sidenav-container/mat-sidenav-container/mat-sidenav-content/div/div/div/"
-    "cdk-virtual-scroll-viewport/div[1]/div[1]/div/flow-grid-tile-container[1]"
-)
-
-XPATH_HOTBAR_ICON = (
-    "/html/body/aisandbox-root/main/flow-project-shell/flow-project-page/div/"
-    "flow-project-sidenav-container/mat-sidenav-container/mat-sidenav-content/div/div/div/"
-    "cdk-virtual-scroll-viewport/div[1]/div[1]/div/flow-grid-tile-container[1]/"
-    "flow-tile-container/div/flow-image-tile/div/div[2]/div/flow-image-hotbar/"
-    "flow-hotbar-container/div/button[3]/mat-icon"
-)
-
-XPATH_CONTEXT_MENU_ITEM_5 = (
-    "/html/body/div[6]/div/div[2]/div/div/"
-    "flow-image-context-menu-items/flow-media-context-menu-items/flow-menu-item[5]"
-)
-
-XPATH_SUBMENU_DOWNLOAD_1K = (
-    "//flow-menu-item[contains(., '1K') or contains(., 'Ukuran asli') or contains(., 'Original')]"
-)
+FLOW_HOME_URL = "https://flow.google.com/"
 
 
 # ==============================================================================
-# MARIONETTE PROTOCOL CLIENT (STEALTH BACKGROUND BRIDGE)
+# MARIONETTE PROTOCOL CLIENT (STEALTH SILENT BRIDGE)
 # ==============================================================================
 class MarionetteDriver:
-    """Klien soket native Marionette untuk Firefox Portable (Stealth Silent Bridge)."""
+    """Klien soket native Marionette untuk Firefox Portable (Stealth Silent Bridge).
+
+    Menyediakan komunikasi langsung dengan mesin peramban Gecko melalui protokol Marionette
+    tanpa menggunakan WebDriver standar eksternal, sehingga atribut navigator.webdriver
+    tetap bernilai undefined (100% stealth dan tidak terdeteksi sebagai robot otomasi).
+
+    Attributes:
+        host (str): Alamat IP host lokal (default '127.0.0.1').
+        port (int): Port soket Marionette (default 2828).
+        sock (socket.socket | None): Objek koneksi soket TCP aktif.
+        msg_id (int): Penomoran ID pesan berurutan untuk JSON wire protocol.
+        session_id (str | None): ID sesi peramban yang sedang aktif.
+    """
 
     def __init__(self, host: str = "127.0.0.1", port: int = 2828):
+        """Menginisialisasi konfigurasi klien Marionette.
+
+        Args:
+            host (str): Host peramban lokal yang mendengarkan port otomasi (default: '127.0.0.1').
+            port (int): Nomor port komunikasi Marionette Firefox (default: 2828).
+        """
         self.host = host
         self.port = port
         self.sock: socket.socket | None = None
@@ -121,7 +108,17 @@ class MarionetteDriver:
         self.session_id: str | None = None
 
     def is_port_open(self, timeout: float = 0.8) -> bool:
-        """Memeriksa ketersediaan port Marionette."""
+        """Memeriksa apakah port Marionette peramban sedang terbuka dan siap menerima koneksi.
+
+        Metode ini mencoba membuka koneksi soket cepat tanpa mengirimkan data apapun untuk
+        memverifikasi kesiapan Firefox Portable sebelum mencoba proses handshake.
+
+        Args:
+            timeout (float): Waktu tunggu maksimal pengujian port dalam detik (default: 0.8).
+
+        Returns:
+            bool: True jika port terbuka dan peramban siap, False jika port tertutup/timeout.
+        """
         try:
             with socket.create_connection((self.host, self.port), timeout=timeout):
                 return True
@@ -129,7 +126,24 @@ class MarionetteDriver:
             return False
 
     def connect(self, timeout: float = 5.0) -> str:
-        """Menghubungkan ke soket Marionette dan membuka sesi baru."""
+        """Membuka koneksi soket TCP ke peramban, melakukan handshake, dan membuat sesi baru.
+
+        Alur kerja:
+        1. Menghubungkan ke 127.0.0.1:2828 via TCP.
+        2. Menerima paket pembuka (handshake JSON) dari Firefox Gecko.
+        3. Mengirimkan pesan 'WebDriver:NewSession' untuk mendaftarkan sesi kontrol aktif.
+        4. Mengatur konteks eksekusi Marionette ke 'content' (halaman web DOM).
+
+        Args:
+            timeout (float): Waktu tunggu maksimal koneksi soket dalam detik (default: 5.0).
+
+        Returns:
+            str: ID sesi Marionette yang dibuat (session_id).
+
+        Raises:
+            ConnectionError: Jika peramban tidak merespons atau soket gagal terhubung.
+            RuntimeError: Jika inisialisasi sesi baru ditolak oleh Gecko.
+        """
         self.sock = socket.create_connection((self.host, self.port), timeout=timeout)
         hs_len = b""
         while True:
@@ -145,16 +159,31 @@ class MarionetteDriver:
         return self.session_id
 
     def send(self, name: str, parameters: dict | None = None) -> dict:
-        """Mengirim pesan perintah JSON wire protocol ke Marionette."""
+        """Mengirimkan perintah berformat Marionette JSON wire protocol ke peramban.
+
+        Format paket pesan Marionette:
+        `[panjang]:[0, msg_id, name, parameters]`
+
+        Args:
+            name (str): Nama perintah Marionette (misal 'WebDriver:ExecuteScript', 'WebDriver:ElementClick').
+            parameters (dict | None): Argumen pendukung untuk perintah tersebut.
+
+        Returns:
+            dict: Respons payload hasil eksekusi dari Gecko.
+
+        Raises:
+            RuntimeError: Jika soket belum tersambung atau jika Gecko mengembalikan pesan galat.
+            ConnectionError: Jika koneksi terputus di tengah proses penerimaan respons.
+        """
         if not self.sock:
-            raise RuntimeError("Koneksi soket Marionette belum dibuka.")
+            raise RuntimeError("Koneksi soket Marionette belum dibuka. Panggil connect() terlebih dahulu.")
 
         self.msg_id += 1
         payload = json.dumps([0, self.msg_id, name, parameters or {}])
         msg = f"{len(payload)}:{payload}".encode("utf-8")
         self.sock.sendall(msg)
 
-        # Baca panjang respons
+        # Baca panjang respons berformat <length>:
         length_bytes = b""
         while True:
             c = self.sock.recv(1)
@@ -178,12 +207,38 @@ class MarionetteDriver:
         return raw_resp[3]
 
     def execute_script(self, script: str, args: list | None = None) -> any:
-        """Mengeksekusi skrip JavaScript di konteks halaman aktif."""
+        """Mengeksekusi skrip JavaScript langsung di dalam konteks halaman web aktif.
+
+        Skrip dieksekusi secara terisolasi di dalam window tab aktif dan dapat mengembalikan
+        nilai berupa tipe data primitif, objek JavaScript (menjadi dictionary Python), array, dsb.
+
+        Args:
+            script (str): Kode JavaScript yang akan dijalankan (dapat menggunakan return nilai).
+            args (list | None): Argumen yang akan dioper ke dalam skrip via array 'arguments'.
+
+        Returns:
+            any: Nilai yang dikembalikan oleh pernyataan return di JavaScript.
+
+        Example:
+            driver.execute_script("return document.title;")
+            driver.execute_script("document.querySelector('button').click();")
+        """
         res = self.send("WebDriver:ExecuteScript", {"script": script, "args": args or []})
         return res.get("value")
 
     def find_element(self, using: str, value: str) -> str:
-        """Mencari elemen dan mengembalikan element ID string."""
+        """Mencari elemen web di halaman aktif dan mengembalikan ID elemen string W3C.
+
+        Args:
+            using (str): Strategi pencarian elemen (misal: 'css selector', 'xpath', 'tag name').
+            value (str): Nilai pemilih/selector elemen yang dicari.
+
+        Returns:
+            str: Identifier string elemen unik (element UUID) untuk pemanggilan ElementClick.
+
+        Raises:
+            RuntimeError: Jika elemen tidak ditemukan di dalam dokumen halaman aktif.
+        """
         res = self.send("WebDriver:FindElement", {"using": using, "value": value})
         val = res.get("value", res) if isinstance(res, dict) else res
         if isinstance(val, dict):
@@ -191,33 +246,65 @@ class MarionetteDriver:
         return str(val)
 
     def click_element(self, element_id: str) -> None:
-        """Mengeklik elemen via Gecko C++ native click (tanpa menggerakkan mouse OS)."""
+        """Mengeklik elemen via Gecko C++ native click tanpa menggerakkan kursor mouse OS.
+
+        Perintah ini memicu aksi klik tingkat rendah di mesin rendering Firefox (Gecko)
+        secara murni internal, sehingga kursor mouse fisik pengguna sama sekali tidak
+        tersentuh atau berpindah posisi.
+
+        Args:
+            element_id (str): ID elemen W3C yang diperoleh dari metode find_element().
+        """
         self.send("WebDriver:ElementClick", {"id": element_id})
 
     def get_window_handles(self) -> list[str]:
-        """Mengambil daftar handle semua tab/jendela yang terbuka."""
+        """Mengambil daftar seluruh handle jendela atau tab yang sedang terbuka di Firefox.
+
+        Returns:
+            list[str]: Daftar string unik identifier untuk setiap tab/jendela.
+        """
         return self.send("WebDriver:GetWindowHandles", {})
 
     def switch_to_window(self, handle: str) -> None:
-        """Beralih ke tab/jendela tertentu."""
+        """Beralih fokus konteks perintah Marionette ke tab atau jendela tertentu.
+
+        Args:
+            handle (str): ID string handle jendela target yang ingin diaktifkan.
+        """
         self.send("WebDriver:SwitchToWindow", {"handle": handle})
 
     def navigate(self, url: str) -> None:
-        """Membuka atau mengarahkan tab aktif ke URL yang ditentukan."""
+        """Membuka atau mengarahkan tab aktif ke alamat URL yang ditentukan.
+
+        Args:
+            url (str): Alamat web lengkap (misal: 'https://flow.google.com/').
+        """
         try:
             self.send("WebDriver:Navigate", {"url": url})
         except Exception:
             self.execute_script("window.location.href = arguments[0];", [url])
 
     def take_screenshot(self, full: bool = False) -> bytes:
-        """Mengambil tangkapan layar halaman web peramban (PNG) langsung dari viewport browser."""
+        """Mengambil tangkapan layar murni dari viewport peramban web dalam format PNG bytes.
+
+        Tangkapan layar diambil langsung dari frame buffer peramban tanpa memotret
+        frame jendela desktop Windows, sehingga menghasilkan gambar jernih halaman web.
+
+        Args:
+            full (bool): Jika True, mengambil seluruh panjang dokumen yang dapat digulir.
+                         Jika False, hanya area viewport yang sedang tampil (default: False).
+
+        Returns:
+            bytes: Data mentah gambar berformat PNG.
+        """
         import base64
+
         res = self.send("WebDriver:TakeScreenshot", {"full": full})
         val = res.get("value") if isinstance(res, dict) else res
         return base64.b64decode(val)
 
     def close(self) -> None:
-        """Menutup koneksi soket."""
+        """Menutup koneksi soket Marionette secara aman."""
         if self.sock:
             try:
                 self.sock.close()
@@ -230,9 +317,27 @@ class MarionetteDriver:
 # IMAGE GENERATOR AUTOMATION CONTROLLER (SILENT BACKGROUND EDITION)
 # ==============================================================================
 class ImageGenerator:
-    """Pengontrol otomasi Google Flow generasi senyap tanpa interupsi pengguna."""
+    """Pengontrol utama otomasi Google Flow untuk generasi gambar latar belakang senyap.
+
+    Mengelola siklus hidup peramban, pendeteksian tab Google Flow, pengisian prompt via
+    DOM ProseMirror, penanganan render tile, pengunduhan file resolusi 1K, pemindahan
+    berkas hasil, hingga pembersihan kanvas ('Pindahkan ke sampah').
+
+    Attributes:
+        workspace_dir (Path): Direktori root workspace proyek.
+        profile_dir (Path): Lokasi direktori profil Firefox Portable terisolasi.
+        ff_bin (Path): Path eksekutabel Firefox Portable (firefox.exe).
+        download_dir (Path): Lokasi folder tempat peramban menyimpan berkas unduhan.
+        driver (MarionetteDriver): Klien soket Marionette internal.
+    """
 
     def __init__(self, workspace_dir: Path | None = None):
+        """Menginisialisasi konfigurasi pengontrol ImageGenerator.
+
+        Args:
+            workspace_dir (Path | None): Direktori workspace root. Jika None, otomatis
+                                         menggunakan direktori tempat skrip ini berada.
+        """
         if workspace_dir is None:
             self.workspace_dir = Path(__file__).resolve().parent
         else:
@@ -244,7 +349,11 @@ class ImageGenerator:
         self.driver = MarionetteDriver()
 
     def _detect_download_dir(self) -> Path:
-        """Mendeteksi direktori unduhan peramban."""
+        """Mendeteksi direktori unduhan peramban secara otomatis dengan prioritas D:\\Downloads.
+
+        Returns:
+            Path: Lokasi direktori unduhan yang valid dan siap digunakan.
+        """
         candidates = [
             Path(r"D:\Downloads"),
             Path.home() / "Downloads",
@@ -257,7 +366,16 @@ class ImageGenerator:
         return candidates[0]
 
     def _is_profile_locked(self) -> bool:
-        """Memeriksa apakah profil sedang dikunci proses lain atau hanya lock yatim."""
+        """Memeriksa apakah profil Firefox sedang dikunci atau memiliki lock yatim (parent.lock).
+
+        Jika file 'parent.lock' ada tetapi dapat dibuka dalam mode append, berarti berkas
+        tersebut adalah lock yatim dari sesi sebelumnya yang crash/ditutup paksa.
+        Metode ini secara otomatis membersihkan lock yatim tersebut (*self-healing*).
+
+        Returns:
+            bool: True jika profil benar-benar sedang digunakan proses Firefox lain,
+                  False jika profil bebas digunakan.
+        """
         lock_file = self.profile_dir / "parent.lock"
         if not lock_file.exists():
             return False
@@ -273,7 +391,11 @@ class ImageGenerator:
             return True
 
     def _ensure_stealth_preferences(self) -> None:
-        """Menjamin pengaturan stealth aktif agar navigator.webdriver tidak terdeteksi."""
+        """Menjamin preferensi stealth anti-deteksi terpasang pada user.js profil.
+
+        Mengatur `dom.webdriver.enabled = false` agar variabel `navigator.webdriver` bernilai
+        `undefined` pada halaman web, serta mengaktifkan port Marionette permanen (2828).
+        """
         user_js = self.profile_dir / "user.js"
         required_prefs = [
             'user_pref("marionette.enabled", true);',
@@ -293,7 +415,18 @@ class ImageGenerator:
                 f.write("\n" + "\n".join(missing) + "\n")
 
     def ensure_browser(self, auto_launch: bool = True, headless: bool = False) -> None:
-        """Memastikan Firefox berjalan dengan stealth mode di latar belakang."""
+        """Memastikan Firefox berjalan dengan mode stealth dan mendengarkan port otomasi 2828.
+
+        Jika peramban belum aktif dan auto_launch=True, peramban akan diluncurkan secara
+        terminimalkan di latar belakang (SW_SHOWMINNOACTIVE) atau mode -headless tanpa GUI.
+
+        Args:
+            auto_launch (bool): Luncurkan peramban secara otomatis jika belum berjalan (default: True).
+            headless (bool): Jika True, peramban dijalankan tanpa jendela grafis sama sekali (default: False).
+
+        Raises:
+            RuntimeError: Jika port otomasi tidak terbuka setelah batas waktu tunggu peluncuran habis.
+        """
         self._ensure_stealth_preferences()
 
         if self.driver.is_port_open(timeout=0.8):
@@ -321,12 +454,12 @@ class ImageGenerator:
             if headless:
                 cmd.append("-headless")
 
-            # Buka secara terminimalkan tanpa mencuri fokus pengguna (SW_SHOWMINNOACTIVE)
+            # Buka terminimalkan tanpa mencuri fokus jendela pengguna (SW_SHOWMINNOACTIVE = 7)
             startupinfo = None
             if sys.platform == "win32" and not headless:
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 7  # SW_SHOWMINNOACTIVE
+                startupinfo.wShowWindow = 7
 
             subprocess.Popen(cmd, env=env, startupinfo=startupinfo)
 
@@ -341,11 +474,22 @@ class ImageGenerator:
                 raise RuntimeError("Gagal terhubung ke port otomasi peramban (2828).")
 
     def connect(self) -> None:
-        """Menghubungkan klien ke peramban."""
+        """Menghubungkan klien soket Marionette ke peramban Firefox."""
         self.driver.connect(timeout=5.0)
 
     def find_flow_tab(self) -> str:
-        """Mencari dan beralih ke tab Google Flow."""
+        """Mencari dan beralih ke tab Google Flow aktif, atau mengarahkan tab ke proyek Flow.
+
+        Memindai seluruh tab terbuka untuk menemukan komponen `aisandbox-root`, `flow-project-shell`,
+        atau URL yang memuat 'flow.google.com/project/'. Jika berada di beranda (home), otomatis
+        mengeklik proyek pertama yang tersedia. Jika belum ada, membuka URL proyek secara langsung.
+
+        Returns:
+            str: Identifier handle tab Google Flow yang berhasil diaktifkan.
+
+        Raises:
+            RuntimeError: Jika tidak ada jendela/tab terbuka sama sekali.
+        """
         handles = self.driver.get_window_handles()
         if not handles:
             raise RuntimeError("Tidak ada tab peramban yang terbuka.")
@@ -370,7 +514,6 @@ class ImageGenerator:
                     continue
 
                 url = (info.get("url") or "").lower()
-                title = (info.get("title") or "").lower()
                 has_flow = info.get("hasFlow")
 
                 if has_flow or ("flow" in url and "project" in url):
@@ -395,8 +538,8 @@ class ImageGenerator:
                 info = self.driver.execute_script(detection_script)
                 if isinstance(info, dict):
                     if "404" in (info.get("url") or ""):
-                        # Jika 404, navigasi ke home Google Flow untuk auto-resolve project
-                        self.driver.navigate("https://flow.google.com/")
+                        # Auto-resolve jika URL proyek lama kedaluwarsa
+                        self.driver.navigate(FLOW_HOME_URL)
                         time.sleep(3.0)
                         h_info = self.driver.execute_script(detection_script)
                         if h_info and h_info.get("projectLink"):
@@ -412,8 +555,25 @@ class ImageGenerator:
         return handles[0]
 
     def submit_prompt(self, prompt_text: str) -> dict:
-        """Memasukkan prompt secara senyap via ProseMirror DOM & Gecko ElementClick."""
-        # Catat snapshot kondisi kanvas sebelum generasi baru
+        """Memasukkan teks prompt ke editor ProseMirror dan memicu tombol buat gambar secara senyap.
+
+        Alur:
+        1. Mencatat snapshot kondisi kanvas saat ini (jumlah gambar & URL gambar teratas).
+        2. Memfokuskan editor ProseMirror (`flow-rich-text-editor div[contenteditable="true"]`).
+        3. Memasukkan teks prompt via `document.execCommand('insertText')` dan memicu `InputEvent`.
+        4. Mengeklik tombol 'Mulai pembuatan' (`flow-generate-icon-button button`) melalui Gecko
+           native click tanpa menggerakkan kursor mouse pengguna.
+
+        Args:
+            prompt_text (str): Teks deskripsi gambar yang akan digenerate.
+
+        Returns:
+            dict: Snapshot awal kanvas berisi `imgCount` (int) dan `firstImgSrc` (str | None).
+
+        Raises:
+            RuntimeError: Jika elemen editor prompt tidak ditemukan pada halaman.
+        """
+        # Catat snapshot kondisi kanvas sebelum generasi baru dimulai
         snapshot_script = """
         const firstImg = document.querySelector('flow-image-tile img');
         return {
@@ -449,7 +609,7 @@ class ImageGenerator:
             btn_id = self.driver.find_element("css selector", "flow-generate-icon-button button")
             self.driver.click_element(btn_id)
         except Exception:
-            # Fallback ke DOM click
+            # Fallback ke DOM click jika ID belum terindeks
             click_btn_script = """
             const btn = document.querySelector('flow-generate-icon-button button') ||
                         document.querySelector('flow-generate-icon-button');
@@ -460,8 +620,30 @@ class ImageGenerator:
 
         return initial_state
 
-    def hover_and_wait_tile(self, initial_state: dict | None = None, timeout: int = 180, progress_callback: any = None) -> bool:
-        """Menunggu generasi gambar selesai (0% -> 100%) dan memantau status render tile baru."""
+    def hover_and_wait_tile(
+        self,
+        initial_state: dict | None = None,
+        timeout: int = 180,
+        progress_callback: any = None,
+    ) -> bool:
+        """Memantau progres generasi gambar (0% -> 100%) dan menunggu render tile baru selesai.
+
+        Menggunakan perbandingan status kanvas terhadap `initial_state` untuk membedakan
+        gambar baru dari gambar yang sudah ada sebelumnya pada kanvas. Mengirimkan pembaruan
+        persentase secara langsung ke `progress_callback` jika tersedia.
+
+        Args:
+            initial_state (dict | None): Snapshot kanvas awal hasil dari `submit_prompt()`.
+            timeout (int): Batas waktu maksimal menunggu proses render dalam detik (default: 180).
+            progress_callback (callable | None): Fungsi callback yang menerima string persentase
+                                                 (misal: `lambda pct: print(f"{pct}%")`).
+
+        Returns:
+            bool: True jika gambar selesai dirender dan hotbar menu opsi siap diakses.
+
+        Raises:
+            TimeoutError: Jika waktu tunggu habis sebelum gambar selesai dirender.
+        """
         start_time = time.time()
         init_count = (initial_state or {}).get("imgCount", 0)
         init_src = (initial_state or {}).get("firstImgSrc")
@@ -505,22 +687,18 @@ class ImageGenerator:
                         if progress_callback:
                             progress_callback(current_prog)
 
-                # Kondisi selesai generasi:
-                # 1. Progres pernah muncul dan sekarang sudah selesai (progress == None)
-                # 2. Atau jumlah gambar bertambah dibanding saat submit
-                # 3. Atau sumber gambar paling atas berbeda dari init_src dan hotbar sudah siap
+                # Kondisi verifikasi gambar baru:
                 img_count = st.get("imgCount", 0)
                 first_src = st.get("firstImgSrc")
 
-                is_new_image = (
-                    (img_count > init_count) or
-                    (first_src and first_src != init_src)
-                )
+                is_new_image = (img_count > init_count) or (first_src and first_src != init_src)
 
+                # 1. Progres pernah berjalan dan sekarang sudah 100% (progress == None)
                 if seen_progress and not current_prog and is_new_image and st.get("hotbarReady"):
                     time.sleep(1.0)
                     return True
 
+                # 2. Gambar baru terdeteksi dengan hotbar siap (fallback batas minimum 8 detik)
                 if is_new_image and not current_prog and st.get("hotbarReady") and (time.time() - start_time > 8):
                     time.sleep(1.0)
                     return True
@@ -530,7 +708,22 @@ class ImageGenerator:
         raise TimeoutError(f"Waktu tunggu generasi gambar habis ({timeout} detik). Gambar belum selesai dirender.")
 
     def click_hotbar_and_download(self, timeout: int = 20) -> bool:
-        """Mengeklik hotbar opsi (tombol 3), membuka menu 'Download', lalu memilih resolusi '1K (Ukuran asli)'."""
+        """Membuka menu opsi hotbar (tombol 3), mengeklik 'Download', dan memilih resolusi '1K (Ukuran asli)'.
+
+        Navigasi dilakukan secara senyap melalui Angular CDK overlay event tanpa memerlukan kursor mouse fisik:
+        1. Mengirimkan event hover (`mouseenter`/`mouseover`) ke tile teratas dan mengeklik tombol hotbar 3.
+        2. Mengeklik item menu 'Download' pada popup menu overlay.
+        3. Mengeklik submenu resolusi '1K (Ukuran asli)' untuk memulai pengunduhan berkas ke disk.
+
+        Args:
+            timeout (int): Batas waktu maksimal interaksi menu dalam detik (default: 20).
+
+        Returns:
+            bool: True jika opsi unduhan resolusi 1K berhasil diklik.
+
+        Raises:
+            RuntimeError: Jika elemen hotbar, menu Download, atau opsi 1K tidak ditemukan.
+        """
         # 1. Buka menu hotbar button 3 secara senyap pada tile teratas
         open_hotbar_script = """
         const tile = document.querySelector('flow-image-tile');
@@ -583,7 +776,21 @@ class ImageGenerator:
         return True
 
     def wait_for_downloaded_file(self, existing_files: set[str], timeout: int = 60) -> Path:
-        """Memantau folder download sampai file .jpg baru selesai diunduh."""
+        """Memantau folder unduhan sampai berkas gambar .jpg baru selesai diunduh secara utuh.
+
+        Memastikan berkas unduhan bukan bagian dari daftar berkas lama (`existing_files`),
+        tidak memiliki ekstensi unduhan sementara (`.part`), dan ukuran berkasnya stabil (> 0 bytes).
+
+        Args:
+            existing_files (set[str]): Kumpulan path absolut berkas gambar yang sudah ada sebelum unduhan dipicu.
+            timeout (int): Batas waktu maksimal menunggu unduhan selesai dalam detik (default: 60).
+
+        Returns:
+            Path: Path absolut dari berkas .jpg yang baru saja selesai diunduh.
+
+        Raises:
+            TimeoutError: Jika berkas unduhan tidak muncul atau tidak selesai dalam batas waktu.
+        """
         start_time = time.time()
         while time.time() - start_time < timeout:
             current_files = list(self.download_dir.glob("*.jpg")) + list(self.download_dir.glob("*.jpeg"))
@@ -605,7 +812,21 @@ class ImageGenerator:
         raise TimeoutError(f"File .jpg hasil unduhan tidak terdeteksi di {self.download_dir} dalam {timeout} detik.")
 
     def delete_current_tile(self, timeout: int = 15) -> bool:
-        """Menghapus gambar dari kanvas peramban ('Pindahkan ke sampah') secara senyap."""
+        """Menghapus gambar yang baru digenerate dari kanvas Google Flow ('Pindahkan ke sampah').
+
+        Membuka menu hotbar pada tile teratas dan mengeklik opsi 'Pindahkan ke sampah'
+        secara otomatis tanpa konfirmasi dialog, sehingga kanvas proyek tetap bersih
+        dan tidak menumpuk riwayat gambar yang tidak terpakai.
+
+        Args:
+            timeout (int): Batas waktu operasi penghapusan dalam detik (default: 15).
+
+        Returns:
+            bool: True jika perintah pemindahan ke sampah berhasil dieksekusi.
+
+        Raises:
+            RuntimeError: Jika opsi 'Pindahkan ke sampah' tidak ditemukan pada menu.
+        """
         # 1. Buka hotbar button 3
         open_script = """
         const tile = document.querySelector('flow-image-tile');
@@ -630,17 +851,17 @@ class ImageGenerator:
         trash.click();
         return { success: true };
         """
-        res_tr = self.driver.execute_script(trash_script)
+        self.driver.execute_script(trash_script)
         time.sleep(1.5)
         return True
 
     def close(self) -> None:
-        """Menutup koneksi driver."""
+        """Menutup koneksi soket Marionette pengontrol."""
         self.driver.close()
 
 
 # ==============================================================================
-# HIGH-LEVEL CALLABLE FUNCTION (UNTUK DIPANGGIL SKRIP LAIN)
+# HIGH-LEVEL CALLABLE API FUNCTION (UNTUK DIPANGGIL OLEH SKRIP LAIN)
 # ==============================================================================
 def generate_image(
     prompt: str,
@@ -649,18 +870,47 @@ def generate_image(
     auto_launch: bool = True,
     headless: bool = False,
 ) -> Path:
-    """Fungsi utama untuk menghasilkan dan mengunduh gambar dari Google Flow secara senyap.
+    """Fungsi utama tingkat tinggi untuk membuat, mengunduh, dan menyimpan gambar secara senyap.
+
+    Fungsi ini menjalankan seluruh siklus kerja otomasi Google Flow di latar belakang
+    tanpa mengganggu kursor mouse atau fokus jendela pengguna (*zero cursor hijacking*):
+    1. Memverifikasi/menjalankan Firefox Portable dalam mode latar belakang stealth.
+    2. Mendeteksi tab Google Flow aktif atau mengarahkannya ke proyek.
+    3. Mengisi prompt ke editor ProseMirror dan memicu pembuatan gambar.
+    4. Menunggu hingga generasi selesai (0% -> 100%).
+    5. Mengunduh gambar dalam resolusi asli 1K.
+    6. Memindahkan file gambar dari folder unduhan ke direktori tujuan yang diminta.
+    7. Menghapus tile gambar dari kanvas Google Flow ('Pindahkan ke sampah').
 
     Args:
-        prompt: Teks deskripsi gambar yang akan digenerate.
-        output_path: Jalur folder atau berkas tujuan pemindahan gambar.
-                     Jika None, disimpan otomatis di folder 'outputs/' dengan nama slug prompt.
-        timeout: Waktu tunggu maksimal generasi gambar (detik).
-        auto_launch: Luncurkan Firefox Portable secara otomatis jika belum berjalan.
-        headless: Jalankan Firefox dalam mode -headless tanpa GUI.
+        prompt (str): Deskripsi teks gambar yang ingin dibuat.
+        output_path (str | Path | None): Jalur folder atau berkas tujuan penyimpanan gambar.
+            - Jika berupa folder: berkas disimpan dengan format slug prompt dan timestamp.
+            - Jika berupa path berkas .jpg: berkas disimpan persis dengan nama tersebut.
+            - Jika None: otomatis disimpan di folder 'outputs/' pada root workspace.
+        timeout (int): Batas waktu maksimal proses pembuatan gambar dalam detik (default: 180).
+        auto_launch (bool): Luncurkan Firefox Portable secara otomatis jika belum berjalan (default: True).
+        headless (bool): Jika True, peramban berjalan tanpa GUI sama sekali di latar belakang (default: False).
 
     Returns:
-        Path: Lokasi absolut berkas gambar .jpg yang telah dipindahkan.
+        Path: Lokasi absolut berkas gambar .jpg yang berhasil dibuat dan dipindahkan.
+
+    Raises:
+        RuntimeError: Jika terjadi kegagalan koneksi peramban atau elemen web tidak ditemukan.
+        TimeoutError: Jika waktu tunggu pembuatan gambar atau pengunduhan habis.
+
+    Example:
+        >>> from image_generator import generate_image
+        >>> # Simpan otomatis ke folder outputs/
+        >>> file_path = generate_image("pemandangan danau pegunungan berkabut saat fajar")
+        >>> print("Gambar disimpan di:", file_path)
+        >>>
+        >>> # Kustomisasi nama berkas dan lokasi tujuan
+        >>> file_kustom = generate_image(
+        ...     prompt="cyberpunk robot cat neon city",
+        ...     output_path="D:/Project/assets/hero_image.jpg",
+        ...     headless=True
+        ... )
     """
     generator = ImageGenerator()
 
@@ -668,14 +918,17 @@ def generate_image(
         generator.ensure_browser(auto_launch=auto_launch, headless=headless)
         generator.connect()
 
-        existing = {str(f.resolve()) for f in list(generator.download_dir.glob("*.jpg")) + list(generator.download_dir.glob("*.jpeg"))}
+        existing = {
+            str(f.resolve())
+            for f in list(generator.download_dir.glob("*.jpg")) + list(generator.download_dir.glob("*.jpeg"))
+        }
         generator.find_flow_tab()
         initial_state = generator.submit_prompt(prompt)
         generator.hover_and_wait_tile(initial_state=initial_state, timeout=timeout)
         generator.click_hotbar_and_download()
         downloaded_file = generator.wait_for_downloaded_file(existing_files=existing, timeout=60)
 
-        # Pemindahan berkas
+        # Pemindahan berkas ke lokasi tujuan
         if output_path is None:
             dest_dir = generator.workspace_dir / "outputs"
             dest_dir.mkdir(parents=True, exist_ok=True)
@@ -695,7 +948,7 @@ def generate_image(
 
         shutil.move(str(downloaded_file), str(target_file))
 
-        # Hapus gambar dari kanvas peramban setelah berkas aman disimpan
+        # Hapus gambar dari kanvas peramban setelah berkas aman tersimpan
         try:
             generator.delete_current_tile()
         except Exception as del_err:
@@ -708,10 +961,24 @@ def generate_image(
 
 
 # ==============================================================================
-# CLI PARSER & INTERFACE
+# CLI PARSER & INTERFACE RUNNER
 # ==============================================================================
 def parse_cli_args() -> tuple[str, str | None, int, bool]:
-    """Mengekstrak prompt tanpa wajib tanda petik, output path, timeout, dan headless flag."""
+    """Mengekstrak parameter baris perintah (CLI) dengan dukungan prompt tanpa wajib tanda petik.
+
+    Mendukung opsi:
+    - `--prompt` / `-p`: Teks prompt (seluruh kata setelah opsi ini digabungkan otomatis).
+    - `--output` / `-o` / `--dest` / `-d`: Folder atau nama berkas tujuan pemindahan.
+    - `--timeout` / `-t`: Batas waktu maksimal generasi dalam detik (default: 180).
+    - `--headless`: Menjalankan peramban murni tanpa jendela GUI.
+
+    Returns:
+        tuple[str, str | None, int, bool]: (prompt_text, output_dest, timeout, headless_mode)
+
+    Example:
+        `python image_generator.py --prompt pemandangan gunung es -o hasil/`
+        `run.bat --headless --prompt robot kucing futuristik`
+    """
     args = sys.argv[1:]
     output_flags = ["--output", "-o", "--dest", "-d"]
     timeout_flags = ["--timeout", "-t"]
@@ -764,9 +1031,14 @@ def parse_cli_args() -> tuple[str, str | None, int, bool]:
 
 
 def main() -> int:
+    """Titik masuk eksekusi utama CLI dengan antarmuka Rich terminal dan progres dinamis.
+
+    Returns:
+        int: Kode keluar proses (0 jika sukses, 1 jika terjadi kegagalan).
+    """
     console.clear()
     banner = (
-        "[brand]IMAGE GENERATOR v2 — GOOGLE FLOW BOT[/brand] [muted]//[/muted] [gold]SILENT BACKGROUND EDITION[/gold]\n"
+        "[brand]IMAGE GENERATOR — GOOGLE FLOW BOT[/brand] [muted]//[/muted] [gold]SILENT BACKGROUND EDITION[/gold]\n"
         "[muted]Otomasi 100% Senyap Tanpa Mengontrol Kursor Pengguna & Berjalan di Latar Belakang[/muted]"
     )
     console.print(Panel(banner, box=box.ROUNDED, style="color(240)"))
@@ -774,7 +1046,9 @@ def main() -> int:
     prompt, output_dest, timeout, headless = parse_cli_args()
 
     if not prompt:
-        console.print("[info]ℹ[/info] [dim]Tips: Jalankan `python image_generator.py --prompt gambar pemandangan -o hasil/` tanpa tanda petik.[/dim]\n")
+        console.print(
+            "[info]ℹ[/info] [dim]Tips: Jalankan `run.bat --prompt gambar pemandangan -o hasil/` tanpa tanda petik.[/dim]\n"
+        )
         prompt = Prompt.ask("[cyan]Masukkan Prompt Generasi Gambar[/cyan]")
 
     if not prompt.strip():
@@ -788,7 +1062,10 @@ def main() -> int:
     table.add_column("Nilai", style="bold white")
     table.add_row("Prompt Teks", f"[gold]{prompt}[/gold]")
     table.add_row("Metode Eksekusi", "[bold green]100% Silent Background (Zero Cursor Hijacking)[/bold green]")
-    table.add_row("Mode Tampilan", "[yellow]Headless (Tanpa GUI)[/yellow]" if headless else "[cyan]Minimized Background[/cyan]")
+    table.add_row(
+        "Mode Tampilan",
+        "[yellow]Headless (Tanpa GUI)[/yellow]" if headless else "[cyan]Minimized Background[/cyan]",
+    )
     table.add_row("Target Pemindahan", f"[accent]{target_display}[/accent]")
     table.add_row("Batas Waktu (Timeout)", f"{timeout} detik")
     console.print(table)
@@ -807,7 +1084,10 @@ def main() -> int:
             generator.ensure_browser(headless=headless)
             generator.connect()
 
-            existing = {str(f.resolve()) for f in list(generator.download_dir.glob("*.jpg")) + list(generator.download_dir.glob("*.jpeg"))}
+            existing = {
+                str(f.resolve())
+                for f in list(generator.download_dir.glob("*.jpg")) + list(generator.download_dir.glob("*.jpeg"))
+            }
             generator.find_flow_tab()
 
             progress.update(task, description="[cyan]Mengirim prompt secara senyap (ProseMirror DOM)...")
@@ -817,7 +1097,9 @@ def main() -> int:
             generator.hover_and_wait_tile(
                 initial_state=initial_state,
                 timeout=timeout,
-                progress_callback=lambda p: progress.update(task, description=f"[gold]Menunggu render gambar selesai ({p}%)...[/gold]")
+                progress_callback=lambda p: progress.update(
+                    task, description=f"[gold]Menunggu render gambar selesai ({p}%)...[/gold]"
+                ),
             )
 
             progress.update(task, description="[cyan]Mengeklik hotbar opsi & memicu unduhan 1K...")

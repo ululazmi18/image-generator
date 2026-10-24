@@ -62,3 +62,10 @@
   - [x] Penghapusan gambar otomatis dari kanvas ('Pindahkan ke sampah') setelah berkas tersimpan
   - [x] Dukungan peramban terminimalkan di latar belakang (`SW_SHOWMINNOACTIVE`) dan mode `--headless`
   - [x] Pengujian empiris end-to-end `image_generator.py` berhasil menghasilkan dan mengunduh gambar aurora borealis (1K) secara senyap dalam 37 detik tanpa menyentuh mouse pengguna
+
+- [x] Standardisasi 2 Berkas Bersih & Dokumentasi Lengkap
+  - [x] Hapus seluruh berkas v1 dan runner redundan (`image_generator_v1.py`, `Image Generator.bat`, `Image Generator.py`, `flow.bat`, `image_generator.bat`, `test_step_by_step.bat`, `test_step_by_step.py`)
+  - [x] Sediakan satu runner Windows bersih `run.bat` dengan penanganan klik ganda (interactive prompt + pause) maupun CLI passthrough
+  - [x] Tambahkan docstrings tingkat fungsi/metode lengkap dan mendalam pada `image_generator.py` (penjelasan, cara kerja di balik layar, Args, Returns, Raises, Example)
+  - [x] Bersihkan unused imports (`win32con`, `win32gui`) dan selektor yang tidak terpakai
+  - [x] Perbarui `README.md` dan sinkronisasi basis data memori AST (agent-memory)
