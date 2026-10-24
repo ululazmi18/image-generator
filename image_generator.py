@@ -343,6 +343,10 @@ class MarionetteDriver:
         val = res.get("value") if isinstance(res, dict) else res
         return base64.b64decode(val)
 
+    def close_window(self) -> list[str]:
+        """Menutup tab atau jendela yang sedang aktif dan mengembalikan sisa handles."""
+        return self.send("WebDriver:CloseWindow", {})
+
     def close(self) -> None:
         """Menutup koneksi soket Marionette secara aman."""
         if self.sock:
@@ -552,18 +556,333 @@ class ImageGenerator:
         """Menghubungkan klien soket Marionette ke peramban Firefox."""
         self.driver.connect(timeout=30.0)
 
-    def find_flow_tab(self) -> str:
-        """Mencari dan beralih ke tab Google Flow aktif, atau mengarahkan tab ke proyek Flow.
+    def cleanup_extra_tabs(self, keep_handle: str | None = None) -> str:
+        """Menutup seluruh tab tambahan yang tidak digunakan sehingga hanya tersisa satu tab bersih.
 
-        Memindai seluruh tab terbuka untuk menemukan komponen `aisandbox-root`, `flow-project-shell`,
-        atau URL yang memuat 'flow.google.com/project/'. Jika berada di beranda (home), otomatis
-        mengeklik proyek pertama yang tersedia. Jika belum ada, membuka URL proyek secara langsung.
+        Args:
+            keep_handle (str | None): ID handle tab yang ingin dipertahankan (opsional).
 
         Returns:
-            str: Identifier handle tab Google Flow yang berhasil diaktifkan.
+            str: ID handle tab yang tersisa dan aktif.
+        """
+        handles = self.driver.get_window_handles()
+        if len(handles) <= 1:
+            if handles:
+                self.driver.switch_to_window(handles[0])
+                return handles[0]
+            raise RuntimeError("Tidak ada tab peramban yang terbuka.")
 
-        Raises:
-            RuntimeError: Jika tidak ada jendela/tab terbuka sama sekali.
+        target_handle = keep_handle if (keep_handle and keep_handle in handles) else handles[0]
+        for h in handles:
+            if h != target_handle:
+                try:
+                    self.driver.switch_to_window(h)
+                    self.driver.close_window()
+                except Exception:
+                    pass
+
+        self.driver.switch_to_window(target_handle)
+        return target_handle
+
+    def handle_login_if_needed(self) -> bool:
+        """Memeriksa dan menangani alur masuk (login) akun Google jika belum terhubung.
+
+        Mengeklik tombol 'Buat dengan Google Flow' pada halaman landing /about, atau memilih
+        akun Google yang sudah tersimpan di profil pada halaman Google Account Chooser.
+
+        Returns:
+            bool: True jika berhasil masuk atau sudah dalam kondisi login, False jika terjadi galat.
+        """
+        login_script = """
+        const url = window.location.href.toLowerCase();
+        // 1. Cek halaman landing /about atau tombol masuk
+        const actionBtn = Array.from(document.querySelectorAll('a, button')).find(el => {
+            const t = (el.textContent || '').trim().toLowerCase();
+            return t.includes('buat dengan google flow') || t.includes('sign in') || t.includes('masuk');
+        });
+        if (actionBtn) {
+            actionBtn.click();
+            return { action: 'clicked_signin', url: url };
+        }
+
+        // 2. Cek Google Account Chooser
+        if (url.includes('accounts.google.com')) {
+            const acc = document.querySelector('div[data-identifier], li[data-identifier], [data-email]');
+            if (acc) {
+                acc.click();
+                return { action: 'selected_account', url: url };
+            }
+        }
+
+        // 3. Cek apakah sudah di dashboard / project
+        const hasDashboard = !!document.querySelector('aisandbox-root, flow-project-shell, .project-card, button[aria-label*="Project"]');
+        return { action: hasDashboard ? 'logged_in' : 'waiting', url: url };
+        """
+        for _ in range(15):
+            try:
+                res = self.driver.execute_script(login_script)
+                if isinstance(res, dict):
+                    action = res.get("action")
+                    if action in ("clicked_signin", "selected_account"):
+                        time.sleep(3.5)
+                        continue
+                    if action == "logged_in":
+                        return True
+            except Exception:
+                pass
+            time.sleep(1.0)
+        return False
+
+    def open_or_create_project(self, target_project_name: str = "images generator") -> bool:
+        """Mencari proyek dengan nama target di dasbor, atau membuat proyek baru jika belum ada.
+
+        Jika proyek bernama 'images generator' (atau variasinya) sudah ada, peramban akan langsung
+        membuka proyek tersebut. Jika belum ada, tombol 'Project baru' akan diklik untuk membuat kanvas baru.
+
+        Args:
+            target_project_name (str): Nama proyek yang dicari atau dibuat (default: 'images generator').
+
+        Returns:
+            bool: True jika berhasil masuk ke dalam kanvas proyek target.
+        """
+        # Cek apakah saat ini sudah berada di dalam kanvas proyek
+        check_inside_script = """
+        const url = window.location.href.toLowerCase();
+        const hasShell = !!document.querySelector('flow-project-shell, flow-prompt-box');
+        const titleEl = document.querySelector('app-project-title, .project-title, header');
+        const title = titleEl ? titleEl.textContent.trim().toLowerCase() : '';
+        return {
+            inside: hasShell && url.includes('/project/'),
+            title: title,
+            url: url
+        };
+        """
+        try:
+            curr = self.driver.execute_script(check_inside_script)
+            if isinstance(curr, dict) and curr.get("inside"):
+                norm_target = target_project_name.lower().replace("_", " ")
+                norm_curr = (curr.get("title") or "").replace("_", " ")
+                if norm_target in norm_curr or "image" in norm_curr:
+                    return True
+        except Exception:
+            pass
+
+        # Navigasikan ke beranda Google Flow jika belum berada di sana
+        curr_url = ""
+        try:
+            curr_url = self.driver.execute_script("return window.location.href;") or ""
+        except Exception:
+            pass
+
+        if "/project/" in curr_url or not ("flow.google.com" in curr_url):
+            self.driver.navigate(FLOW_HOME_URL)
+            time.sleep(3.0)
+
+        # Cari proyek yang cocok atau buat proyek baru
+        select_project_script = """
+        const target = arguments[0].toLowerCase().replace(/[\\s_-]+/g, ' ');
+        const cards = document.querySelectorAll('.project-card, a[href*="/project/"], mat-card');
+        for (const card of cards) {
+            const txt = (card.textContent || '').toLowerCase().replace(/[\\s_-]+/g, ' ');
+            if (txt.includes(target) || txt.includes('image generator') || txt.includes('images generator')) {
+                const link = card.querySelector('a, [role="button"]') || card;
+                link.click();
+                return { action: 'opened_existing', text: card.textContent.trim() };
+            }
+        }
+
+        // Jika tidak ditemukan, cari tombol Project baru
+        const newProjBtn = Array.from(document.querySelectorAll('button, a')).find(el => {
+            const t = (el.textContent || '').trim().toLowerCase();
+            const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+            return t.includes('project baru') || t.includes('new project') || aria.includes('project baru') || aria.includes('new project');
+        });
+        if (newProjBtn) {
+            newProjBtn.click();
+            return { action: 'created_new' };
+        }
+
+        // Fallback: klik link project pertama jika ada
+        const firstLink = document.querySelector('a[href*="/project/"]');
+        if (firstLink) {
+            firstLink.click();
+            return { action: 'opened_fallback' };
+        }
+
+        return { action: 'none' };
+        """
+
+        console.print(f"[info]ℹ[/info] Memeriksa proyek [cyan]{target_project_name}[/cyan] di Google Flow...")
+        opened = False
+        for _ in range(20):
+            try:
+                res = self.driver.execute_script(select_project_script, [target_project_name])
+                if isinstance(res, dict) and res.get("action") in ("opened_existing", "created_new", "opened_fallback"):
+                    opened = True
+                    break
+            except Exception:
+                pass
+            time.sleep(1.0)
+
+        # Tunggu kanvas proyek termuat penuh
+        wait_canvas_script = """
+        return !!document.querySelector('flow-project-shell, flow-prompt-box, flow-rich-text-editor');
+        """
+        for _ in range(25):
+            try:
+                ready = self.driver.execute_script(wait_canvas_script)
+                if ready:
+                    time.sleep(1.5)
+                    return True
+            except Exception:
+                pass
+            time.sleep(1.0)
+
+        return opened
+
+    def disable_agent_mode(self) -> bool:
+        """Menonaktifkan Mode Agen pada kotak prompt Google Flow jika sedang aktif.
+
+        Memeriksa atribut `aria-pressed` atau styling tombol chip 'Agen'. Jika aktif,
+        tombol tersebut diklik untuk beralih kembali ke mode pembuatan gambar standar.
+
+        Returns:
+            bool: True jika mode agen non-aktif atau berhasil dimatikan.
+        """
+        toggle_script = """
+        const agentBtn = document.querySelector('button.agent-mode-chip') ||
+                         Array.from(document.querySelectorAll('button')).find(el => (el.textContent || '').trim() === 'Agen');
+        if (!agentBtn) return { status: 'not_found' };
+
+        const isPressed = agentBtn.getAttribute('aria-pressed') === 'true' ||
+                          agentBtn.classList.contains('active') ||
+                          agentBtn.classList.contains('mat-mdc-button-checked');
+
+        if (isPressed) {
+            agentBtn.click();
+            return { status: 'deactivated' };
+        }
+        return { status: 'already_off' };
+        """
+        try:
+            res = self.driver.execute_script(toggle_script)
+            if isinstance(res, dict) and res.get("status") == "deactivated":
+                console.print("[info]ℹ[/info] Mode Agen dinonaktifkan (beralih ke mode standar).")
+                time.sleep(0.8)
+                return True
+        except Exception:
+            pass
+        return True
+
+    def configure_generation_settings(
+        self,
+        model_name: str = "Nano Banana Pro",
+        count_str: str = "x1",
+    ) -> bool:
+        """Mengonfigurasi setelan generasi ke mode Gambar, model Banana Pro, dan kuantitas 1x.
+
+        Args:
+            model_name (str): Nama model AI yang dipilih (default: 'Nano Banana Pro').
+            count_str (str): Jumlah variasi gambar per generasi (default: 'x1').
+
+        Returns:
+            bool: True jika setelan berhasil diterapkan atau sudah sesuai.
+        """
+        config_script = """
+        const targetModel = arguments[0];
+        const targetCount = arguments[1];
+
+        // 1. Cek apakah ringkasan chip setelan sudah sesuai
+        const summaryEl = document.querySelector('button.settings-trigger-button .settings-summary') ||
+                          document.querySelector('button.settings-trigger-button');
+        const summaryText = summaryEl ? (summaryEl.textContent || '') : '';
+
+        if (summaryText.includes(targetModel) && summaryText.includes(targetCount)) {
+            return { status: 'already_configured', summary: summaryText };
+        }
+
+        // 2. Buka panel setelan jika belum terbuka
+        let settingsPanel = document.querySelector('flow-prompt-box-settings');
+        if (!settingsPanel) {
+            const settingsBtn = document.querySelector('button.settings-trigger-button') ||
+                                document.querySelector('button[aria-label="Pemicu setelan"]');
+            if (settingsBtn) {
+                settingsBtn.click();
+            }
+        }
+
+        return { status: 'opened' };
+        """
+
+        step2_script = """
+        const targetModel = arguments[0];
+        const targetCount = arguments[1];
+
+        // Pastikan tab "Gambar" aktif
+        const toggles = document.querySelectorAll('flow-prompt-box-settings mat-button-toggle, mat-button-toggle');
+        for (const t of toggles) {
+            if ((t.textContent || '').includes('Gambar') && !t.classList.contains('mat-button-toggle-checked')) {
+                const btn = t.querySelector('button');
+                if (btn) btn.click();
+            }
+        }
+
+        // Pilih Model Banana Pro jika belum
+        const modelBtn = document.querySelector('flow-prompt-box-settings button[aria-label="Pilih rangkaian model"], button[aria-label="Pilih rangkaian model"]');
+        if (modelBtn && !(modelBtn.textContent || '').includes('Banana Pro')) {
+            modelBtn.click();
+            const items = document.querySelectorAll('.mat-mdc-menu-panel [role="menuitem"], .mat-mdc-menu-item');
+            for (const item of items) {
+                if ((item.textContent || '').includes('Banana Pro') || (item.textContent || '').includes(targetModel)) {
+                    item.click();
+                    break;
+                }
+            }
+        }
+
+        // Pilih Jumlah Generasi (x1)
+        const countToggles = document.querySelectorAll('flow-prompt-box-settings mat-button-toggle, mat-button-toggle');
+        for (const t of countToggles) {
+            const text = (t.textContent || '').trim();
+            if (text === targetCount && !t.classList.contains('mat-button-toggle-checked')) {
+                const btn = t.querySelector('button');
+                if (btn) btn.click();
+            }
+        }
+
+        // Tutup panel setelan
+        document.body.click();
+        return { status: 'configured' };
+        """
+
+        try:
+            res1 = self.driver.execute_script(config_script, [model_name, count_str])
+            if isinstance(res1, dict) and res1.get("status") == "already_configured":
+                return True
+
+            time.sleep(0.5)
+            self.driver.execute_script(step2_script, [model_name, count_str])
+            time.sleep(0.5)
+            console.print(f"[success]✓ Setelan dikonfigurasi:[/success] [cyan]{model_name}[/cyan] ({count_str})")
+            return True
+        except Exception:
+            return False
+
+    def find_flow_tab(self) -> str:
+        """Mencari dan beralih ke tab Google Flow aktif, atau menginisialisasi lingkungan proyek.
+
+        Alur:
+        1. Memindai seluruh tab peramban untuk menemukan tab Google Flow aktif.
+        2. Jika belum ada tab Google Flow:
+           - Membersihkan semua tab ekstra sehingga peramban bersih.
+           - Mengarahkan tab ke beranda Google Flow (https://flow.google.com/).
+        3. Menangani alur login otomatis jika akun belum terhubung.
+        4. Masuk ke proyek 'images generator' (atau membuat baru jika belum ada).
+        5. Menonaktifkan Mode Agen pada prompt box.
+        6. Mengonfigurasi model ke 'Nano Banana Pro' dan generasi 1x.
+
+        Returns:
+            str: Identifier handle tab Google Flow yang siap digunakan.
         """
         handles = self.driver.get_window_handles()
         if not handles:
@@ -574,60 +893,46 @@ class ImageGenerator:
             url: window.location.href,
             title: document.title,
             hasFlow: !!document.querySelector('aisandbox-root, flow-project-shell, flow-prompt-box, flow-rich-text-editor'),
-            projectLink: (function() {
-                const a = document.querySelector('a[href*="/project/"]');
-                return a ? a.href : null;
-            })()
+            isHome: window.location.href.includes('flow.google.com') && !window.location.href.includes('/project/')
         };
         """
 
+        flow_handle = None
         for handle in handles:
             try:
                 self.driver.switch_to_window(handle)
                 info = self.driver.execute_script(detection_script)
-                if not isinstance(info, dict):
-                    continue
-
-                url = (info.get("url") or "").lower()
-                has_flow = info.get("hasFlow")
-
-                if has_flow or ("flow" in url and "project" in url):
-                    return handle
-
-                # Jika di halaman home Google Flow, buka project yang tersedia
-                if info.get("projectLink"):
-                    self.driver.navigate(info["projectLink"])
-                    time.sleep(3.0)
-                    return handle
+                if isinstance(info, dict):
+                    url = (info.get("url") or "").lower()
+                    if info.get("hasFlow") or "flow.google.com" in url:
+                        flow_handle = handle
+                        break
             except Exception:
                 continue
 
-        # Jika belum ada tab yang memuat Google Flow, arahkan tab aktif ke proyek Google Flow
-        console.print(f"[info]ℹ[/info] Mengarahkan peramban ke [cyan]{FLOW_PROJECT_URL}[/cyan]...")
-        self.driver.switch_to_window(handles[0])
-        self.driver.navigate(FLOW_PROJECT_URL)
-        time.sleep(4.0)
+        if not flow_handle:
+            console.print("[info]ℹ[/info] Tab Google Flow belum ada. Membersihkan tab ekstra dan membuka Google Flow...")
+            active_handle = self.cleanup_extra_tabs()
+            self.driver.switch_to_window(active_handle)
+            self.driver.navigate(FLOW_HOME_URL)
+            time.sleep(3.5)
+            flow_handle = active_handle
+        else:
+            self.driver.switch_to_window(flow_handle)
 
-        for _ in range(25):
-            try:
-                info = self.driver.execute_script(detection_script)
-                if isinstance(info, dict):
-                    if "404" in (info.get("url") or ""):
-                        # Auto-resolve jika URL proyek lama kedaluwarsa
-                        self.driver.navigate(FLOW_HOME_URL)
-                        time.sleep(3.0)
-                        h_info = self.driver.execute_script(detection_script)
-                        if h_info and h_info.get("projectLink"):
-                            self.driver.navigate(h_info["projectLink"])
-                            time.sleep(3.0)
-                            return handles[0]
-                    if info.get("hasFlow") or "flow" in (info.get("url") or "").lower():
-                        return handles[0]
-            except Exception:
-                pass
-            time.sleep(1.0)
+        # 1. Tangani login jika diperlukan
+        self.handle_login_if_needed()
 
-        return handles[0]
+        # 2. Masuk ke proyek 'images generator' atau buat baru
+        self.open_or_create_project(target_project_name="images generator")
+
+        # 3. Nonaktifkan mode agen jika sedang aktif
+        self.disable_agent_mode()
+
+        # 4. Konfigurasi setelan model ke Nano Banana Pro x1
+        self.configure_generation_settings(model_name="Nano Banana Pro", count_str="x1")
+
+        return flow_handle
 
     def clean_failed_tiles(self) -> int:
         """Mendeteksi dan menghapus tile error/gagal yang masih ada pada kanvas Google Flow.
@@ -724,19 +1029,32 @@ class ImageGenerator:
 
         time.sleep(0.5)
 
-        # Klik tombol generate via Gecko C++ native click (tanpa sentuh kursor OS)
-        try:
-            btn_id = self.driver.find_element("css selector", "flow-generate-icon-button button")
-            self.driver.click_element(btn_id)
-        except Exception:
-            # Fallback ke DOM click jika ID belum terindeks
-            click_btn_script = """
-            const btn = document.querySelector('flow-generate-icon-button button') ||
-                        document.querySelector('flow-generate-icon-button');
-            if (btn) { btn.click(); return true; }
-            return false;
-            """
-            self.driver.execute_script(click_btn_script)
+        # Klik tombol generate via Gecko C++ native click / DOM click
+        click_btn_script = """
+        const candidates = [
+            'flow-generate-icon-button button',
+            'button.generate-button',
+            'button[aria-label="Kirim"]',
+            'button[aria-label="Generate"]',
+            'flow-prompt-box button.mat-mdc-icon-button:last-of-type',
+            'flow-prompt-box button:last-of-type'
+        ];
+        for (const sel of candidates) {
+            const btn = document.querySelector(sel);
+            if (btn && !btn.disabled) {
+                btn.click();
+                return { success: true, selector: sel };
+            }
+        }
+        // Fallback: picu event Enter pada editor
+        const editor = document.querySelector('flow-rich-text-editor div[contenteditable="true"], div[contenteditable="true"]');
+        if (editor) {
+            editor.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13 }));
+            return { success: true, method: 'enter_key' };
+        }
+        return { success: false };
+        """
+        self.driver.execute_script(click_btn_script)
 
         return initial_state
 
