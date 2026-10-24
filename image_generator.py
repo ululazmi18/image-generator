@@ -2148,6 +2148,185 @@ def generate(
 
 
 # ==============================================================================
+# BANTUAN TERMINAL (HELP INTERFACE)
+# ==============================================================================
+def show_help() -> None:
+    """Menampilkan panduan bantuan komprehensif, profesional, dan visual berbasis Rich terminal."""
+    console.clear()
+    banner = (
+        "[brand]IMAGE GENERATOR — GOOGLE FLOW AUTOMATION[/brand] [muted]//[/muted] [gold]PANDUAN PENGGUNAAN RESMI[/gold]\n"
+        "[muted]Otomasi 100% Senyap Tanpa Mengontrol Kursor Pengguna (Zero Cursor Hijacking) & Mode Native Headless[/muted]"
+    )
+    console.print(Panel(banner, box=box.ROUNDED, style="color(240)"))
+
+    usage_panel = (
+        "[bold cyan]SINTAKSIS PENGGUNAAN (USAGE):[/bold cyan]\n"
+        "  [gold]run.bat[/gold] [accent][OPSI...][/accent] [white][\"PROMPT TEKS\"][/white]             [dim]# Runner Batch / Dobel-klik (Windows)[/dim]\n"
+        "  [gold]python image_generator.py[/gold] [accent][OPSI...][/accent] [white][\"PROMPT TEKS\"][/white]  [dim]# Baris Perintah Langsung (CLI)[/dim]\n"
+        "  [gold]from image_generator import generate[/gold]            [dim]# Layanan Modul Python Profesional[/dim]"
+    )
+    console.print(Panel(usage_panel, title="[bold]Cara Menjalankan[/bold]", box=box.ROUNDED, style="color(240)"))
+
+    # Tabel 1: Daftar Opsi CLI
+    opts_table = Table(
+        title="[bold cyan]DAFTAR OPSI & ARGUMEN BARIS PERINTAH (COMMAND LINE OPTIONS)[/bold cyan]",
+        box=box.ROUNDED,
+        header_style="bold color(208)",
+        expand=True,
+    )
+    opts_table.add_column("Opsi Flag", style="cyan", width=16)
+    opts_table.add_column("Alias", style="yellow", width=14)
+    opts_table.add_column("Tipe & Default", style="green", width=16)
+    opts_table.add_column("Deskripsi & Keterangan Penggunaan", style="white")
+
+    opts_table.add_row(
+        "--prompt",
+        "-p",
+        "Str [dim](Interaktif)[/dim]",
+        "Deskripsi teks prompt gambar. Jika dikosongkan, CLI beralih otomatis ke mode interaktif.",
+    )
+    opts_table.add_row(
+        "--model",
+        "-m",
+        "Str [dim]('pro')[/dim]",
+        "Pilihan model AI: [yellow]'pro'[/yellow] (Nano Banana Pro), [yellow]'lite'[/yellow] (2 Lite), [yellow]'2.1'[/yellow].",
+    )
+    opts_table.add_row(
+        "--aspect-ratio",
+        "--ar, -a, --ratio",
+        "Str [dim]('16:9')[/dim]",
+        "Aspek rasio gambar: [magenta]'16:9'[/magenta], [magenta]'4:3'[/magenta], [magenta]'1:1'[/magenta], [magenta]'3:4'[/magenta], [magenta]'9:16'[/magenta] (atau alias [magenta]'square'[/magenta], [magenta]'vertical'[/magenta]).",
+    )
+    opts_table.add_row(
+        "--count",
+        "-c, -v, --var",
+        "Int/Str [dim]('x1')[/dim]",
+        "Jumlah variasi gambar: [green]1[/green], [green]2[/green], [green]3[/green], [green]4[/green] (atau [green]'x1'[/green] s/d [green]'x4'[/green]).",
+    )
+    opts_table.add_row(
+        "--output",
+        "-o, -d, --dest",
+        "Path [dim]('outputs/')[/dim]",
+        "Folder atau nama file tujuan (.jpg). Jika direktori, nama file otomatis dari prompt & timestamp.",
+    )
+    opts_table.add_row(
+        "--timeout",
+        "-t",
+        "Int [dim](180s)[/dim]",
+        "Batas waktu maksimal render per percobaan dalam detik.",
+    )
+    opts_table.add_row(
+        "--debug",
+        "-",
+        "Flag [dim](Nonaktif)[/dim]",
+        "Mode inspeksi visual. Setiap fase didokumentasikan dalam format .png pada folder [accent]debug/[/accent].",
+    )
+    opts_table.add_row(
+        "--help",
+        "-h, help, /?",
+        "Flag",
+        "Menampilkan panduan bantuan komprehensif ini dan keluar.",
+    )
+    console.print(opts_table)
+
+    # Tabel 2: Model AI
+    models_table = Table(
+        title="[bold yellow]PILIHAN MODEL AI GOOGLE FLOW YANG DIDUKUNG[/bold yellow]",
+        box=box.ROUNDED,
+        header_style="bold yellow",
+        expand=True,
+    )
+    models_table.add_column("Model AI Google Flow", style="bold yellow", width=22)
+    models_table.add_column("Alias Cepat", style="cyan", width=16)
+    models_table.add_column("Karakteristik & Rekomendasi Penggunaan", style="white")
+
+    models_table.add_row(
+        "🍌 Nano Banana Pro",
+        "pro, banana pro",
+        "Model flagship Google Flow. Kualitas sinematik tertinggi, fotorealistis, pencahayaan alami, dan detail tekstur maksimal.",
+    )
+    models_table.add_row(
+        "🍌 Nano Banana 2 Lite",
+        "lite, 2 lite",
+        "Model ringan berkecepatan tinggi. Rendering kilat dan sangat efisien untuk sketsa, kartun, dan konsep cepat.",
+    )
+    models_table.add_row(
+        "🍌 Nano Banana 2.1",
+        "2.1, banana 2.1",
+        "Versi terbaru arsitektur Google Flow dengan peningkatan akurasi pemahaman prompt dan komposisi elemen kompleks.",
+    )
+    console.print(models_table)
+
+    # Tabel 3: Aspek Rasio
+    ratios_table = Table(
+        title="[bold magenta]PILIHAN ASPEK RASIO & DIMENSI PIKSEL ASLI[/bold magenta]",
+        box=box.ROUNDED,
+        header_style="bold magenta",
+        expand=True,
+    )
+    ratios_table.add_column("Rasio", style="bold magenta", width=7)
+    ratios_table.add_column("Dimensi Piksel", style="green", width=15)
+    ratios_table.add_column("Alias Cepat", style="cyan", width=18)
+    ratios_table.add_column("Rekomendasi Peruntukan Media", style="white")
+
+    ratios_table.add_row(
+        "16:9",
+        "1376 × 768 px",
+        "landscape, wide",
+        "Wallpaper desktop, banner web, presentasi widescreen 16:9, thumbnail YouTube.",
+    )
+    ratios_table.add_row(
+        "4:3",
+        "1152 × 896 px",
+        "standard, tablet",
+        "Layar monitor klasik, tablet / iPad, presentasi slide standar.",
+    )
+    ratios_table.add_row(
+        "1:1",
+        "1024 × 1024 px",
+        "square, kotak",
+        "Feed Instagram, cover album musik, foto profil, avatar, ikon aplikasi.",
+    )
+    ratios_table.add_row(
+        "3:4",
+        "896 × 1152 px",
+        "portrait, cetak",
+        "Poster potret vertikal, foto dokumen / cetak, brosur vertikal.",
+    )
+    ratios_table.add_row(
+        "9:16",
+        "768 × 1376 px",
+        "vertical, shorts",
+        "Layar penuh smartphone, YouTube Shorts, Instagram Reels, TikTok, Story.",
+    )
+    console.print(ratios_table)
+
+    # Panel Contoh Penggunaan
+    examples_text = (
+        "[bold cyan]1. Mode Interaktif (Tanya-Jawab Ramah Pengguna):[/bold cyan]\n"
+        "   [dim]> Dobel-klik berkas[/dim] [gold]run.bat[/gold] [dim]atau jalankan:[/dim]\n"
+        "   [gold]run.bat[/gold]\n\n"
+        "[bold cyan]2. Konten Video Pendek Vertikal (Reels / TikTok / Shorts):[/bold cyan]\n"
+        "   [gold]run.bat[/gold] [accent]--prompt[/accent] \"[white]cyberpunk samurai bersinar di malam hujan[/white]\" [accent]--ar[/accent] [magenta]9:16[/magenta] [accent]--model[/accent] [gold]pro[/gold]\n\n"
+        "[bold cyan]3. Feed Instagram Bujur Sangkar (1:1 Model Lite):[/bold cyan]\n"
+        "   [gold]python image_generator.py[/gold] [accent]-p[/accent] \"[white]cangkir kopi hangat latte art kucing[/white]\" [accent]-m[/accent] [gold]lite[/gold] [accent]-a[/accent] [magenta]1:1[/magenta] [accent]-o[/accent] [green]hasil/[/green]\n\n"
+        "[bold cyan]4. Wallpaper Komputer Widescreen (16:9 Sinematik):[/bold cyan]\n"
+        "   [gold]run.bat[/gold] [accent]--prompt[/accent] \"[white]panorama pegunungan fajar berkabut 8k[/white]\" [accent]--ar[/accent] [magenta]16:9[/magenta] [accent]--model[/accent] [gold]pro[/gold] [accent]--debug[/accent]\n\n"
+        "[bold cyan]5. Integrasi Sebagai Layanan Modul Python:[/bold cyan]\n"
+        "   [green]from[/green] [gold]image_generator[/gold] [green]import[/green] [accent]generate[/accent]\n\n"
+        "   [white]result = generate([/white]\n"
+        "       [white]prompt=[/white]\"[gold]istana kristal terapung di awan[/gold]\",\n"
+        "       [white]model=[/white]\"[gold]pro[/gold]\",\n"
+        "       [white]aspect_ratio=[/white]\"[magenta]16:9[/magenta]\",\n"
+        "       [white]count=[/white][green]1[/green],\n"
+        "       [white]output_path=[/white]\"[green]outputs/[/green]\",\n"
+        "   [white])[/white]\n"
+        "   [white]print(f\"Gambar selesai: {result.file_path} ({result.duration_seconds:.1f}s)\")[/white]"
+    )
+    console.print(Panel(examples_text, title="[bold]Contoh Penggunaan Praktis[/bold]", box=box.ROUNDED, style="color(240)"))
+
+
+# ==============================================================================
 # CLI PARSER & INTERFACE RUNNER
 # ==============================================================================
 def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool]:
@@ -2161,11 +2340,18 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool]:
     - `--output` / `-o` / `--dest` / `-d`: Folder atau nama berkas tujuan pemindahan.
     - `--timeout` / `-t`: Batas waktu maksimal per percobaan dalam detik (default: 180).
     - `--debug`: Mengaktifkan mode debug visual dengan dokumentasi tangkapan layar (.png).
+    - `--help` / `-h` / `help`: Menampilkan panduan bantuan lengkap dan keluar.
 
     Returns:
         tuple: (prompt, output_dest, model, aspect_ratio, count_str, timeout, debug_enabled)
     """
     args = sys.argv[1:]
+
+    help_flags = ["--help", "-h", "help", "/?", "-?"]
+    if any(a in help_flags for a in args):
+        show_help()
+        sys.exit(0)
+
     output_flags = ["--output", "-o", "--dest", "-d"]
     timeout_flags = ["--timeout", "-t"]
     retries_flags = ["--retries", "-r"]
