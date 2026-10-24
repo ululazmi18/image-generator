@@ -49,7 +49,7 @@ Dapat dijalankan langsung melalui double-click runner Windows (`run.bat`), baris
 Ikuti urutan tahapan di bawah ini untuk menyiapkan lingkungan kerja dari awal hingga siap menghasilkan gambar secara mandiri:
 
 ### Langkah 1: Kloning Repositori Image Generator & Pasang Dependensi
-Buka terminal PowerShell pada direktori kerja Anda (misal `D:\Documents`), lalu kloning dan pasang dependensinya:
+Buka terminal PowerShell pada direktori kerja Anda (misal `C:\Users\...\Documents`), lalu kloning dan pasang dependensinya:
 ```powershell
 # 1. Kloning repositori image-generator
 git clone https://github.com/ululazmi18/image-generator.git
@@ -64,15 +64,18 @@ pip install -r requirements.txt
 ---
 
 ### Langkah 2: Kloning & Siapkan Peramban Firefox Stealth
-Di dalam direktori `image-generator`, kloning repositori pendukung [firefox-stealth-automation](https://github.com/ululazmi18/firefox-stealth-automation) untuk mengunduh peramban portabel dan membentuk profil stealth:
+Di dalam direktori `image-generator`, siapkan peramban mandiri anti-deteksi:
 ```powershell
-# 1. Kloning repositori browser stealth di dalam folder proyek
+# 1. Pasang 7-Zip jika belum terpasang (agar ekstraksi berjalan 100% senyap otomatis)
+winget install 7zip.7zip
+
+# 2. Kloning repositori browser stealth di dalam folder proyek
 git clone https://github.com/ululazmi18/firefox-stealth-automation.git
 
-# 2. Masuk ke direktori firefox-stealth-automation
+# 3. Masuk ke direktori firefox-stealth-automation
 cd firefox-stealth-automation
 
-# 3. Pasang dependensi dan unduh Firefox Portable otomatis
+# 4. Pasang dependensi dan unduh Firefox Portable otomatis
 pip install -r requirements.txt
 python setup_browser.py
 ```
@@ -80,33 +83,34 @@ python setup_browser.py
 
 ---
 
-### Langkah 3: Login Akun Google & Buka Google Flow
-Jalankan peramban sekali secara manual untuk melakukan autentikasi login akun Google Anda:
-```powershell
-# Jalankan peramban Firefox menggunakan profil yang telah disiapkan
-.\firefox_portable\App\Firefox64\firefox.exe -profile .\browser_profile\
-```
-1. Pada jendela Firefox yang terbuka, kunjungi situs [Google Flow](https://labs.google/fx/tools/flow).
-2. Lakukan login menggunakan akun Google Anda dan pastikan antarmuka kanvas Google Flow telah siap digunakan.
-3. Setelah login berhasil, **tutup jendela peramban Firefox tersebut** (agar sesi profil tersimpan dan file lock dilepas).
-
----
-
-### Langkah 4: Salin Folder Profil & Biner ke `image-generator`
+### Langkah 3: Salin Folder Profil & Biner ke `image-generator`
 Kembali ke folder utama `image-generator`, lalu salin folder profil dan biner Firefox yang telah siap pakai:
 ```powershell
 # 1. Kembali ke direktori utama image-generator
 cd ..
 
-# 2. Salin folder profil browser yang sudah login Google
+# 2. Salin folder profil browser yang telah dikonfigurasi
 Copy-Item -Path ".\firefox-stealth-automation\browser_profile" -Destination ".\" -Recurse -Force
 
 # 3. Salin folder biner Firefox Portable
 Copy-Item -Path ".\firefox-stealth-automation\firefox_portable" -Destination ".\" -Recurse -Force
 ```
-> **Proteksi Keamanan Akun:** Folder `browser_profile/` dan `firefox_portable/` sudah otomatis terdaftar di [`.gitignore`](file:///d:/Documents/Image%20Generator/.gitignore). Kredensial, cookies login, maupun file biner peramban tidak akan pernah terdorong (*pushed*) ke repositori publik GitHub.
+> **Proteksi Keamanan Akun:** Folder `browser_profile/` dan `firefox_portable/` sudah otomatis terdaftar di [`.gitignore`](.gitignore). Kredensial, cookies login, maupun file biner peramban tidak akan pernah terdorong (*pushed*) ke repositori publik GitHub.
 
 *(Tips: Setelah disalin, Anda dapat menghapus folder `firefox-stealth-automation` untuk menghemat ruang penyimpanan jika diinginkan).*
+
+---
+
+### Langkah 4: Login Akun Google & Buka Google Flow (Hanya Sekali)
+Cukup jalankan runner login yang telah disediakan:
+```powershell
+.\login.bat
+```
+*(Atau cukup **Klik Ganda / Double-Click** berkas `login.bat` di File Explorer).*
+
+1. Pada jendela Firefox yang terbuka, kunjungi situs [Google Flow](https://flow.google.com).
+2. Lakukan login menggunakan akun Google Anda dan pastikan antarmuka kanvas Google Flow telah siap digunakan.
+3. Setelah login berhasil, **tutup jendela peramban Firefox tersebut** (agar sesi profil tersimpan dan file lock dilepas).
 
 ---
 
@@ -117,7 +121,7 @@ Pilih salah satu metode eksekusi berikut:
 
 #### Metode A: Windows Batch Runner (`run.bat`)
 Cara termudah bagi pengguna desktop Windows:
-- **Klik Ganda (*Double Click*)** berkas [run.bat](file:///d:/Documents/Image%20Generator/run.bat), lalu ketik prompt saat diminta di terminal.
+- **Klik Ganda (*Double Click*)** berkas [run.bat](run.bat), lalu ketik prompt saat diminta di terminal.
 - Atau jalankan langsung via PowerShell dengan parameter bebas:
 ```powershell
 .\run.bat -a 16:9 -m pro -p "mobil sport futuristik di tengah kota cyberpunk fajar"
@@ -223,4 +227,4 @@ Image Generator/
 
 ## 📄 Lisensi
 
-Proyek ini dirilis secara bebas dan terbuka di bawah lisensi [MIT License](file:///d:/Documents/Image%20Generator/LICENSE).
+Proyek ini dirilis secara bebas dan terbuka di bawah lisensi [MIT License](LICENSE).
