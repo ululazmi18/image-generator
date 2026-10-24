@@ -25,3 +25,8 @@ tmp/
 screenshots/
 outputs/
 debug/
+reports/
+
+# Portable Browser Binaries & Downloaders
+firefox_portable/
+*.paf.exe
