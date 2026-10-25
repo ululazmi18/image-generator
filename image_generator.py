@@ -94,7 +94,6 @@ console = Console(theme=CUSTOM_THEME)
 # ==============================================================================
 # KONFIGURASI URL GOOGLE FLOW
 # ==============================================================================
-FLOW_PROJECT_URL = "https://flow.google.com/project/d2653e23-18ab-4dda-b15b-3a77cf1085dd"
 FLOW_HOME_URL = "https://flow.google.com/"
 
 
@@ -761,7 +760,7 @@ class ImageGenerator:
             'user_pref("browser.sessionstore.resume_from_crash", false);',
             'user_pref("toolkit.startup.max_resumed_crashes", -1);',
             'user_pref("browser.startup.page", 3);',
-            'user_pref("browser.startup.homepage", "https://flow.google.com/project/8eed2cd9-e563-46d8-9ad2-395e53901db4");',
+            'user_pref("browser.startup.homepage", "https://flow.google.com/");',
         ]
         existing = ""
         if user_js.exists():
@@ -940,10 +939,11 @@ class ImageGenerator:
         return False
 
     def open_or_create_project(self, target_project_name: str = "images generator") -> bool:
-        """Mencari proyek dengan nama target di dasbor, atau membuat proyek baru jika belum ada.
+        """Mencari proyek dengan nama target di dasbor, atau membuka proyek yang ada / membuat baru.
 
-        Jika proyek bernama 'images generator' (atau variasinya) sudah ada, peramban akan langsung
-        membuka proyek tersebut. Jika belum ada, tombol 'Project baru' akan diklik untuk membuat kanvas baru.
+        Jika kanvas proyek aktif sudah terbuka, metode ini akan langsung menggunakannya.
+        Jika di beranda atau halaman 404, peramban akan membuka proyek yang ada di dasbor
+        atau membuat proyek baru jika belum ada.
 
         Args:
             target_project_name (str): Nama proyek yang dicari atau dibuat (default: 'images generator').
@@ -951,91 +951,99 @@ class ImageGenerator:
         Returns:
             bool: True jika berhasil masuk ke dalam kanvas proyek target.
         """
-        # Cek apakah saat ini sudah berada di dalam kanvas proyek
+        # 1. Cek apakah saat ini sudah berada di dalam kanvas proyek yang valid
         check_inside_script = """
         const url = window.location.href.toLowerCase();
         const hasShell = !!document.querySelector('flow-project-shell, flow-prompt-box');
-        const titleEl = document.querySelector('app-project-title, .project-title, header');
-        const title = titleEl ? titleEl.textContent.trim().toLowerCase() : '';
+        const hasEditor = !!document.querySelector('.ProseMirror[contenteditable="true"]');
+        const isNot404 = !url.includes('/404') && !url.includes('reason=project');
         return {
-            inside: hasShell && url.includes('/project/'),
-            title: title,
-            url: url
+            inside: (hasShell || hasEditor) && url.includes('/project/') && isNot404,
+            url: window.location.href
         };
         """
         try:
             curr = self.driver.execute_script(check_inside_script)
             if isinstance(curr, dict) and curr.get("inside"):
-                norm_target = target_project_name.lower().replace("_", " ")
-                norm_curr = (curr.get("title") or "").replace("_", " ")
-                if norm_target in norm_curr or "image" in norm_curr or not norm_curr:
-                    self.current_project_url = curr.get("url")
-                    return True
+                self.current_project_url = curr.get("url")
+                return True
         except Exception:
             pass
 
-        # Navigasikan ke beranda Google Flow jika belum berada di sana
+        # 2. Navigasikan ke beranda Google Flow jika belum di kanvas valid atau sedang di 404
         curr_url = ""
         try:
             curr_url = self.driver.execute_script("return window.location.href;") or ""
         except Exception:
             pass
 
-        if "/project/" in curr_url or not ("flow.google.com" in curr_url):
+        if "/404" in curr_url or "reason=project" in curr_url or not ("flow.google.com" in curr_url) or "/project/" in curr_url:
+            console.print(f"[info]ℹ[/info] Memeriksa proyek [cyan]{target_project_name}[/cyan] di Google Flow...")
             self.driver.navigate(FLOW_HOME_URL)
-            time.sleep(3.0)
+            time.sleep(3.5)
 
-        # Cari proyek yang cocok atau buat proyek baru
+        # 3. Tutup dialog modal onboarding jika muncul di beranda
+        self.dismiss_onboarding_dialog()
+
+        # 4. Cari proyek di dasbor atau buat proyek baru
         select_project_script = """
-        const target = arguments[0].toLowerCase().replace(/[\\s_-]+/g, ' ');
-        const cards = document.querySelectorAll('.project-card, a[href*="/project/"], mat-card');
-        for (const card of cards) {
-            const txt = (card.textContent || '').toLowerCase().replace(/[\\s_-]+/g, ' ');
-            if (txt.includes(target) || txt.includes('image generator') || txt.includes('images generator')) {
-                const link = card.querySelector('a, [role="button"]') || card;
-                link.click();
-                return { action: 'opened_existing', text: card.textContent.trim() };
+        const target = (arguments[0] || '').toLowerCase().replace(/[\\s_-]+/g, ' ');
+
+        // 4a. Cari proyek yang namanya cocok dengan target ('images generator' / 'image generator')
+        const links = Array.from(document.querySelectorAll('a[href*="/project/"]'));
+        if (target) {
+            const matchedLink = links.find(a => {
+                const txt = (a.textContent || '').toLowerCase().replace(/[\\s_-]+/g, ' ');
+                const aria = (a.getAttribute('aria-label') || '').toLowerCase();
+                return txt.includes(target) || aria.includes(target) || txt.includes('image generator') || aria.includes('image generator');
+            });
+            if (matchedLink) {
+                matchedLink.click();
+                return { action: 'opened_named', href: matchedLink.href };
             }
         }
 
-        // Jika tidak ditemukan, cari tombol Project baru
-        const newProjBtn = Array.from(document.querySelectorAll('button, a')).find(el => {
-            const t = (el.textContent || '').trim().toLowerCase();
-            const aria = (el.getAttribute('aria-label') || '').toLowerCase();
-            return t.includes('project baru') || t.includes('new project') || aria.includes('project baru') || aria.includes('new project');
-        });
+        // 4b. Jika ada proyek yang sudah ada di dasbor pengguna, buka proyek pertama/terbaru
+        if (links.length > 0) {
+            links[0].click();
+            return { action: 'opened_existing', href: links[0].href };
+        }
+
+        // 4c. Jika belum ada proyek sama sekali, klik tombol 'Project baru'
+        const newProjBtn = document.querySelector('button.new-project-button') ||
+                           Array.from(document.querySelectorAll('button, a')).find(el => {
+                               const t = (el.textContent || '').trim().toLowerCase();
+                               const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                               return t.includes('project baru') || t.includes('new project') || aria.includes('project baru') || aria.includes('new project');
+                           });
         if (newProjBtn) {
             newProjBtn.click();
             return { action: 'created_new' };
         }
 
-        // Fallback: klik link project pertama jika ada
-        const firstLink = document.querySelector('a[href*="/project/"]');
-        if (firstLink) {
-            firstLink.click();
-            return { action: 'opened_fallback' };
-        }
-
         return { action: 'none' };
         """
 
-        console.print(f"[info]ℹ[/info] Memeriksa proyek [cyan]{target_project_name}[/cyan] di Google Flow...")
         opened = False
-        for _ in range(20):
+        for _ in range(15):
             try:
                 res = self.driver.execute_script(select_project_script, [target_project_name])
-                if isinstance(res, dict) and res.get("action") in ("opened_existing", "created_new", "opened_fallback"):
+                if isinstance(res, dict) and res.get("action") in ("opened_named", "opened_existing", "created_new"):
                     opened = True
                     break
             except Exception:
                 pass
             time.sleep(1.0)
 
-        # Tunggu kanvas proyek termuat penuh
+        # 5. Tunggu kanvas proyek termuat penuh
         wait_canvas_script = """
-        return !!document.querySelector('flow-project-shell, flow-prompt-box, flow-rich-text-editor');
+        const url = window.location.href.toLowerCase();
+        const hasShell = !!document.querySelector('flow-project-shell, flow-prompt-box');
+        const hasEditor = !!document.querySelector('.ProseMirror[contenteditable="true"]');
+        const isNot404 = !url.includes('/404') && !url.includes('reason=project');
+        return (hasShell || hasEditor) && url.includes('/project/') && isNot404;
         """
-        for _ in range(25):
+        for _ in range(30):
             try:
                 ready = self.driver.execute_script(wait_canvas_script)
                 if ready:
@@ -1049,7 +1057,7 @@ class ImageGenerator:
                 pass
             time.sleep(1.0)
 
-        return opened
+        return False
 
     def dismiss_onboarding_dialog(self) -> bool:
         """Menutup dialog modal onboarding atau persetujuan kebijakan privasi Google Flow secara mandiri.
@@ -1452,7 +1460,10 @@ class ImageGenerator:
         self.dismiss_onboarding_dialog()
 
         # 3. Masuk ke proyek 'images generator' atau buka kanvas proyek
-        self.open_or_create_project(target_project_name="images generator")
+        if not self.open_or_create_project(target_project_name="images generator"):
+            console.print("[warning]⚠ Mencoba ulang membuka kanvas proyek Google Flow...[/warning]")
+            if not self.open_or_create_project(target_project_name=""):
+                raise RuntimeError("Gagal membuka atau membuat kanvas proyek Google Flow.")
 
         # 4. Tutup dialog modal onboarding jika muncul di kanvas proyek
         self.dismiss_onboarding_dialog()
@@ -2113,7 +2124,7 @@ def generate(
                 # Segarkan halaman jika beberapa kali percobaan berturut-turut gagal
                 if attempt > 1 and attempt % 4 == 0:
                     try:
-                        nav_url = getattr(generator, "current_project_url", None) or FLOW_PROJECT_URL
+                        nav_url = getattr(generator, "current_project_url", None) or FLOW_HOME_URL
                         generator.driver.navigate(nav_url)
                         time.sleep(3.5)
                         generator.find_flow_tab()
@@ -2602,7 +2613,7 @@ def main() -> int:
                             description=f"[cyan]Menyegarkan halaman Google Flow (Percobaan ke-{attempt})...[/cyan]",
                         )
                         try:
-                            nav_url = getattr(generator, "current_project_url", None) or FLOW_PROJECT_URL
+                            nav_url = getattr(generator, "current_project_url", None) or FLOW_HOME_URL
                             generator.driver.navigate(nav_url)
                             time.sleep(3.5)
                             generator.find_flow_tab()
