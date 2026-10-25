@@ -843,6 +843,29 @@ def verify_session_headless(
     if not firefox_bin.exists():
         return {"success": False, "message": f"Biner Firefox tidak ditemukan di: {firefox_bin}"}
 
+    cookies_db = profile_dir / "cookies.sqlite"
+    has_google_cookie = False
+    if cookies_db.exists():
+        try:
+            conn = sqlite3.connect(str(cookies_db))
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM moz_cookies WHERE host LIKE '%google.com%'")
+            row = cur.fetchone()
+            count = row[0] if row else 0
+            conn.close()
+            if count > 0:
+                has_google_cookie = True
+        except Exception:
+            pass
+
+    if not has_google_cookie:
+        return {
+            "success": False,
+            "status": "fresh_install",
+            "url": "https://flow.google.com/about",
+            "message": "Profil peramban baru terpasang (kondisi bersih). Akun Google belum terhubung.",
+        }
+
     lock = profile_dir / "parent.lock"
     if lock.exists():
         try:
@@ -908,18 +931,28 @@ def verify_session_headless(
                             "title": state.get("title", ""),
                             "message": "Berhasil terotentikasi di Google Flow!",
                         }
+                    if "/about" in last_url.lower():
+                        return {
+                            "success": False,
+                            "status": "not_logged_in",
+                            "url": last_url,
+                            "title": state.get("title", ""),
+                            "message": "Akun Google belum masuk (halaman informasi publik flow.google.com/about).",
+                        }
                     if state.get("isAuth") and "accounts.google.com" in last_url:
                         return {
                             "success": False,
+                            "status": "not_logged_in",
                             "url": last_url,
                             "title": state.get("title", ""),
-                            "message": "Sesi belum aktif (terlempar ke halaman Google Account Sign-In).",
+                            "message": "Sesi belum aktif (berada di halaman login accounts.google.com).",
                         }
             except Exception:
                 pass
 
         return {
             "success": False,
+            "status": "timeout",
             "url": last_url,
             "message": "Waktu tunggu habis saat memuat kanvas Google Flow.",
         }
@@ -1131,18 +1164,29 @@ def _print_verify_result(res: dict) -> None:
     if res["success"]:
         console.print(
             Panel(
-                f"[bold green]✓ SESI GOOGLE FLOW TERVERIFIKASI & AKTIF![/bold green]\n\n"
+                f"[bold green]✓ SESI GOOGLE FLOW AKTIF & TERVERIFIKASI![/bold green]\n\n"
                 f"URL Kanvas : [cyan]{res.get('url', '-')}[/cyan]\n"
                 f"Judul Tab  : [white]{res.get('title', '-')}[/white]\n\n"
-                "[muted]Generator siap digunakan secara senyap (headless) tanpa perlu membuka jendela lagi.[/muted]",
+                "[muted]Generator siap digunakan secara senyap (headless) di latar belakang.[/muted]",
                 box=box.ROUNDED,
                 title="[green]Status Autentikasi Headless[/green]",
+            )
+        )
+    elif res.get("status") in ("fresh_install", "not_logged_in") or "/about" in res.get("url", "").lower():
+        console.print(
+            Panel(
+                f"[bold yellow]ℹ AKUN GOOGLE BELUM TERHUBUNG KE PERAMBAN LOKAL[/bold yellow]\n\n"
+                f"Kondisi : [white]{res.get('message', 'Peramban dalam status bersih. Sesi Google belum terpasang.')}[/white]\n"
+                f"URL     : [cyan]{res.get('url', '-')}[/cyan]\n\n"
+                "[bold green]Langkah Berikutnya:[/bold green] Silakan masukkan email & sandi di terminal untuk menghubungkan akun Google Anda.",
+                box=box.ROUNDED,
+                title="[yellow]Status Akun Google Flow[/yellow]",
             )
         )
     else:
         console.print(
             Panel(
-                f"[bold red]✗ VERIFIKASI GAGAL / SESI TIDAK VALID[/bold red]\n\n"
+                f"[bold red]✗ KENDALA VERIFIKASI PERAMBAN[/bold red]\n\n"
                 f"Pesan   : [yellow]{res.get('message', '-')}[/yellow]\n"
                 f"URL     : [dim]{res.get('url', '-')}[/dim]\n\n"
                 "[muted]Silakan jalankan opsi [1] Otomasi Login Penuh untuk menghubungkan sesi Google Flow Anda.[/muted]",
