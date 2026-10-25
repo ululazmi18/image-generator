@@ -85,4 +85,9 @@
   - [x] Tingkatkan `image_generator.py` untuk mendeteksi sesi peramban aktif dari Repo Browser via port Marionette (127.0.0.1:2828), environment variable, atau path tetangga
   - [x] Perbarui `README.md` dengan arsitektur ekosistem 2 repositori dan diagram koneksi ke Repo Browser
 
-
+- [x] Pemisahan & Dekopling Fitur Login ke Repositori Browser (firefox-stealth-automation)
+  - [x] Implementasi mesin login mandiri `login.py` di `firefox-stealth-automation` (100% Full CLI, mode tunggal, memanfaatkan biner Chrome Portable lokal tanpa browser Windows)
+  - [x] Pembaruan `install.ps1` dan `requirements.txt` di `firefox-stealth-automation`
+  - [x] Eliminasi berkas `login_cli.py` dan `login.bat` dari `image-generator`
+  - [x] Rampingkan `requirements.txt` `image-generator` (tanpa pustaka `playwright`)
+  - [x] Perbarui `install.ps1` dan `README.md` pada `image-generator`
