@@ -10,20 +10,19 @@
       return;
     }
 
-    // 1. Definisikan native getter & setter palsu menggunakan API exportFunction
-    const getter = exportFunction(function () {
+    // 1. Definisikan native getter palsu dengan identitas "get webdriver"
+    const getter = exportFunction(function webdriver() {
       return false;
     }, win);
 
-    const setter = exportFunction(function (_val) {
-      // no-op
-    }, win);
+    try {
+      win.Object.defineProperty(getter, "name", { value: "get webdriver", configurable: true });
+    } catch (_e) {}
 
-    // 2. Clone descriptor ke kompartemen halaman web
+    // 2. Clone descriptor ke kompartemen halaman web TANPA setter (WebIDL readonly attribute)
     const desc = cloneInto(
       {
         get: getter,
-        set: setter,
         enumerable: true,
         configurable: true,
       },
@@ -39,6 +38,14 @@
       try {
         delete win.navigator.webdriver;
       } catch (_delErr) {}
+    }
+
+    // 5. Normalisasi window.outerWidth & outerHeight jika dalam mode headless
+    if (win.outerWidth === win.innerWidth && win.outerHeight === win.innerHeight) {
+      try {
+        win.Object.defineProperty(win, "outerWidth", { value: win.innerWidth + 16, configurable: true });
+        win.Object.defineProperty(win, "outerHeight", { value: win.innerHeight + 85, configurable: true });
+      } catch (_dimErr) {}
     }
   } catch (_err) {
     // Abaikan jika konteks halaman terisolasi atau di-restrict

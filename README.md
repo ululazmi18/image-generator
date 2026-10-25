@@ -56,7 +56,7 @@ irm https://raw.githubusercontent.com/ululazmi18/image-generator/main/install.ps
 > 2. Mengkloning repositori `image-generator`.
 > 3. Memasang seluruh pustaka Python (`requirements.txt`).
 > 4. Mengunduh dan mengonfigurasi **Firefox Portable** serta profil stealth anti-deteksi bot.
-> 5. Membuka jendela login akun Google Flow sekali saja, dan generator langsung siap pakai!
+> 5. Memverifikasi dan menghubungkan autentikasi akun Google Flow secara otomatis langsung via terminal!
 
 ---
 
@@ -117,16 +117,16 @@ Copy-Item -Path ".\firefox-stealth-automation\firefox_portable" -Destination ".\
 
 ---
 
-### Langkah 4: Login Akun Google & Buka Google Flow (Hanya Sekali)
-Cukup jalankan runner login yang telah disediakan:
+### Langkah 4: Autentikasi Akun Google ke Google Flow (100% Otomasi Terminal)
+Cukup jalankan runner autentikasi yang telah disediakan:
 ```powershell
 .\login.bat
 ```
-*(Atau cukup **Klik Ganda / Double-Click** berkas `login.bat` di File Explorer).*
+*(Atau via baris perintah langsung: `python login_cli.py --auto`)*.
 
-1. Pada jendela Firefox yang terbuka, kunjungi situs [Google Flow](https://flow.google.com).
-2. Lakukan login menggunakan akun Google Anda dan pastikan antarmuka kanvas Google Flow telah siap digunakan.
-3. Setelah login berhasil, **tutup jendela peramban Firefox tersebut** (agar sesi profil tersimpan dan file lock dilepas).
+1. Masukkan email dan kata sandi akun Google Anda secara aman langsung di terminal.
+2. Skrip secara otomatis menembus sistem keamanan Google Sign-In, mendeteksi verifikasi 2FA jika diminta (cukup ketuk Ya / pilih angka di ponsel Anda), dan menyimpan seluruh token sesi ke `browser_profile/cookies.sqlite`.
+3. Setelah sesi terhubung, sistem langsung memverifikasi kompatibilitas secara senyap (*headless*) dan siap digunakan untuk membuat gambar!
 
 ---
 
