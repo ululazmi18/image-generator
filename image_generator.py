@@ -39,7 +39,7 @@ import subprocess
 import sys
 import time
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -276,12 +276,77 @@ class GenerationResult:
     count: str
     attempt: int
     duration_seconds: float
+    file_paths: list[Path] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.file_paths and self.file_path:
+            self.file_paths = [self.file_path]
+        elif self.file_paths and not self.file_path:
+            self.file_path = self.file_paths[0]
 
     def __str__(self) -> str:
         return str(self.file_path)
 
     def __fspath__(self) -> str:
         return str(self.file_path)
+
+
+def resolve_target_file_path(
+    output_path: str | Path | None,
+    prompt: str,
+    index: int,
+    total_count: int,
+    workspace_dir: Path,
+    timestamp: str | None = None,
+) -> Path:
+    """Menentukan path tujuan berkas gambar hasil generasi sesuai konvensi penamaan standar.
+
+    Aturan Penamaan:
+    1. Jika total_count == 1:
+       - Nama file spesifik (misal: 'testd.jpg'): disimpan sebagai 'testd.jpg'.
+       - Direktori / None: disimpan sebagai '{slug}_{timestamp}.jpg'.
+    2. Jika total_count >= 2:
+       - Nama file spesifik (misal: 'testd.jpg'): langsung diberi penomoran '-1', '-2', dst
+         (contoh: 'testd-1.jpg', 'testd-2.jpg', dst; tidak menggunakan 'testd.jpg' murni).
+       - Direktori / None: disimpan sebagai '{slug}_{timestamp}-1.jpg', '{slug}_{timestamp}-2.jpg', dst.
+
+    Args:
+        output_path (str | Path | None): Lokasi atau nama file tujuan.
+        prompt (str): Prompt teks untuk pembentukan slug jika disimpan di folder.
+        index (int): Indeks gambar saat ini (0-indexed: 0, 1, 2, ...).
+        total_count (int): Jumlah total gambar yang dihasilkan dan diunduh.
+        workspace_dir (Path): Direktori workspace root.
+        timestamp (str | None): Timestamp seragam format '%Y%m%d_%H%M%S'.
+
+    Returns:
+        Path: Path absolut target penyimpanan berkas.
+    """
+    if timestamp is None:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if output_path is None:
+        dest_dir = workspace_dir / "outputs"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        slug = re.sub(r"[^\w\s-]", "", prompt)[:30].strip().replace(" ", "_") or "image"
+        if total_count >= 2:
+            return dest_dir / f"{slug}_{timestamp}-{index + 1}.jpg"
+        return dest_dir / f"{slug}_{timestamp}.jpg"
+
+    target_path = Path(output_path).resolve()
+    if target_path.is_dir() or (not target_path.suffix and not target_path.exists()):
+        target_path.mkdir(parents=True, exist_ok=True)
+        slug = re.sub(r"[^\w\s-]", "", prompt)[:30].strip().replace(" ", "_") or "image"
+        if total_count >= 2:
+            return target_path / f"{slug}_{timestamp}-{index + 1}.jpg"
+        return target_path / f"{slug}_{timestamp}.jpg"
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    suffix = target_path.suffix or ".jpg"
+    stem = target_path.stem
+
+    if total_count >= 2:
+        return target_path.parent / f"{stem}-{index + 1}{suffix}"
+    return target_path.parent / f"{stem}{suffix}"
 
 
 # ==============================================================================
@@ -1700,6 +1765,7 @@ class ImageGenerator:
     ) -> bool:
         """Memantau progres generasi gambar (0% -> 100%) dan menunggu render tile baru selesai.
 
+        Mendukung pemantauan pembuatan satu atau banyak gambar (x1 s/d x4).
         Mendeteksi kegagalan generasi (seperti batas penggunaan / server error) secara instan.
         Jika terdeteksi kegagalan di kanvas, fungsi segera menghapus tile gagal tersebut dan
         melemparkan `GenerationFailedError` agar proses dapat langsung diulang dari awal.
@@ -1721,15 +1787,25 @@ class ImageGenerator:
         init_count = (initial_state or {}).get("imgCount", 0)
         init_src = (initial_state or {}).get("firstImgSrc")
 
+        expected_count = 1
+        try:
+            expected_count = int(str(self.count_str).replace("x", "").strip())
+        except Exception:
+            expected_count = 1
+
         check_script = """
+        const expectedCount = arguments[0];
         const tiles = Array.from(document.querySelectorAll('flow-image-tile, flow-grid-tile-container'));
+        const imageTiles = Array.from(document.querySelectorAll('flow-image-tile'));
         const firstTile = document.querySelector('flow-image-tile') || tiles[0];
         const tileText = firstTile ? firstTile.innerText : '';
         const progressMatch = tileText.match(/(\\d+)%/);
+        const allImgs = Array.from(document.querySelectorAll('flow-image-tile img'));
         const firstImg = firstTile ? firstTile.querySelector('img') : null;
-        const allImgs = document.querySelectorAll('flow-image-tile img');
         const btn = document.querySelector('flow-generate-icon-button button');
         const isImgLoaded = firstImg ? (firstImg.complete && firstImg.naturalWidth > 0) : false;
+        const allLoaded = allImgs.length >= expectedCount && allImgs.every(img => img.complete && img.naturalWidth > 0);
+        const hasProgress = tiles.some(t => /\\d+%/.test(t.innerText || ''));
 
         let failedMsg = null;
         for (const t of tiles) {
@@ -1760,6 +1836,8 @@ class ImageGenerator:
             imgCount: allImgs.length,
             firstImgSrc: firstImg ? firstImg.src : null,
             isImgLoaded: isImgLoaded,
+            allLoaded: allLoaded,
+            hasProgress: hasProgress,
             progress: progressMatch ? progressMatch[1] : null,
             btnDisabled: btn ? btn.disabled : false,
             hotbarReady: hotbarReady,
@@ -1771,7 +1849,7 @@ class ImageGenerator:
         last_progress = None
 
         while time.time() - start_time < timeout:
-            st = self.driver.execute_script(check_script)
+            st = self.driver.execute_script(check_script, [expected_count])
             if isinstance(st, dict):
                 # Deteksi kegagalan render secara instan tanpa menunggu timeout
                 failed_msg = st.get("failedMsg")
@@ -1791,26 +1869,28 @@ class ImageGenerator:
                 # Kondisi verifikasi gambar baru:
                 img_count = st.get("imgCount", 0)
                 first_src = st.get("firstImgSrc")
+                has_progress = st.get("hasProgress")
+                all_loaded = st.get("allLoaded")
 
                 is_new_image = (img_count > init_count) or (first_src and first_src != init_src)
 
-                # 1. Progres pernah berjalan dan sekarang sudah 100% (progress == None)
-                if seen_progress and not current_prog and is_new_image:
+                # 1. Seluruh gambar target terdeteksi dan sudah selesai dimuat tanpa progress bar aktif
+                if is_new_image and all_loaded and not has_progress:
                     time.sleep(1.0)
                     return True
 
-                # 2. Gambar baru terdeteksi sudah selesai dimuat (isImgLoaded)
-                if is_new_image and not current_prog and st.get("isImgLoaded"):
+                # 2. Progres pernah berjalan dan sekarang sudah 100% (progress == None)
+                if seen_progress and not current_prog and not has_progress and is_new_image:
                     time.sleep(1.0)
                     return True
 
                 # 3. Hotbar opsi siap diakses setelah beberapa detik
-                if is_new_image and not current_prog and st.get("hotbarReady") and (time.time() - start_time > 8):
+                if is_new_image and not current_prog and not has_progress and st.get("hotbarReady") and (time.time() - start_time > 8):
                     time.sleep(1.0)
                     return True
 
                 # 4. Gambar selesai dibuat (persentase hilang, tile baru ada, dan bukan tile galat)
-                if is_new_image and not current_prog and (time.time() - start_time > 6):
+                if is_new_image and not current_prog and not has_progress and (time.time() - start_time > 6):
                     time.sleep(1.0)
                     return True
 
@@ -1818,15 +1898,16 @@ class ImageGenerator:
 
         raise TimeoutError(f"Waktu tunggu generasi gambar habis ({timeout} detik). Gambar belum selesai dirender.")
 
-    def click_hotbar_and_download(self, timeout: int = 20) -> bool:
+    def click_hotbar_and_download(self, tile_index: int = 0, timeout: int = 20) -> bool:
         """Membuka menu opsi hotbar (tombol 3), mengeklik 'Download', dan memilih resolusi '1K (Ukuran asli)'.
 
         Navigasi dilakukan secara senyap melalui Angular CDK overlay event tanpa memerlukan kursor mouse fisik:
-        1. Mengirimkan event hover (`mouseenter`/`mouseover`) ke tile teratas dan mengeklik tombol hotbar 3.
+        1. Mengirimkan event hover (`mouseenter`/`mouseover`) ke tile dengan index yang ditentukan dan mengeklik tombol hotbar 3.
         2. Mengeklik item menu 'Download' pada popup menu overlay.
         3. Mengeklik submenu resolusi '1K (Ukuran asli)' untuk memulai pengunduhan berkas ke disk.
 
         Args:
+            tile_index (int): Indeks tile yang akan diunduh (default: 0 untuk tile pertama).
             timeout (int): Batas waktu maksimal interaksi menu dalam detik (default: 20).
 
         Returns:
@@ -1835,9 +1916,11 @@ class ImageGenerator:
         Raises:
             RuntimeError: Jika elemen hotbar, menu Download, atau opsi 1K tidak ditemukan.
         """
-        # 1. Buka menu hotbar button 3 secara senyap pada tile teratas
+        # 1. Buka menu hotbar button 3 secara senyap pada tile index tertentu
         open_hotbar_script = """
-        const tile = document.querySelector('flow-image-tile');
+        const tileIndex = arguments[0];
+        const tiles = Array.from(document.querySelectorAll('flow-image-tile'));
+        const tile = tiles[tileIndex] || tiles[0];
         if (!tile) return { success: false, error: 'Tile gambar tidak ditemukan.' };
 
         tile.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
@@ -1849,9 +1932,9 @@ class ImageGenerator:
         btn.click();
         return { success: true };
         """
-        res_h = self.driver.execute_script(open_hotbar_script)
+        res_h = self.driver.execute_script(open_hotbar_script, [tile_index])
         if not isinstance(res_h, dict) or not res_h.get("success"):
-            raise RuntimeError(f"Gagal membuka menu hotbar opsi: {res_h}")
+            raise RuntimeError(f"Gagal membuka menu hotbar opsi pada tile ke-{tile_index}: {res_h}")
 
         time.sleep(1.0)
 
@@ -1867,7 +1950,7 @@ class ImageGenerator:
         """
         res_dl = self.driver.execute_script(click_dl_script)
         if not isinstance(res_dl, dict) or not res_dl.get("success"):
-            raise RuntimeError(f"Gagal mengeklik menu Download: {res_dl}")
+            raise RuntimeError(f"Gagal mengeklik menu Download pada tile ke-{tile_index}: {res_dl}")
 
         time.sleep(1.0)
 
@@ -1882,9 +1965,66 @@ class ImageGenerator:
         """
         res_1k = self.driver.execute_script(click_1k_script)
         if not isinstance(res_1k, dict) or not res_1k.get("success"):
-            raise RuntimeError(f"Gagal mengeklik opsi resolusi 1K: {res_1k}")
+            raise RuntimeError(f"Gagal mengeklik opsi resolusi 1K pada tile ke-{tile_index}: {res_1k}")
 
         return True
+
+    def download_all_tiles(
+        self,
+        expected_count: int = 1,
+        existing_files: set[str] | None = None,
+        progress_callback: any = None,
+        timeout: int = 60,
+    ) -> list[Path]:
+        """Memicu unduhan resolusi 1K untuk seluruh tile gambar hasil generasi di kanvas secara berurutan.
+
+        Mendukung pengunduhan 1 hingga 4 gambar sekaligus sesuai jumlah variasi (-c 1 s/d -c 4).
+        Memastikan setiap berkas unduhan benar-benar stabil dan selesai sebelum memicu unduhan berikutnya.
+
+        Args:
+            expected_count (int): Jumlah target gambar yang diharapkan (1-4).
+            existing_files (set[str] | None): Berkas gambar yang sudah ada sebelum pengunduhan.
+            progress_callback (callable | None): Callback laporan status unduhan per-gambar.
+            timeout (int): Batas waktu maksimal unduhan per gambar dalam detik (default: 60).
+
+        Returns:
+            list[Path]: Daftar path berkas unduhan gambar baru (.jpg) yang berhasil diunduh.
+        """
+        if existing_files is None:
+            existing_files = set()
+            for d in self.download_dirs:
+                if d.exists():
+                    for f in list(d.glob("*.jpg")) + list(d.glob("*.jpeg")):
+                        existing_files.add(str(f.resolve()))
+
+        # Hitung jumlah tile aktual yang ada di kanvas
+        tile_count = 0
+        try:
+            tile_count = int(self.driver.execute_script("return document.querySelectorAll('flow-image-tile').length;") or 0)
+        except Exception:
+            tile_count = 0
+
+        target_downloads = min(tile_count, expected_count) if tile_count > 0 else expected_count
+        if target_downloads <= 0:
+            target_downloads = 1
+
+        downloaded_files: list[Path] = []
+        current_existing = set(existing_files)
+
+        for idx in range(target_downloads):
+            if progress_callback:
+                progress_callback(idx + 1, target_downloads)
+
+            # 1. Pemicu unduhan 1K pada tile ke-idx
+            self.click_hotbar_and_download(tile_index=idx)
+
+            # 2. Tunggu berkas unduhan selesai
+            dl_file = self.wait_for_downloaded_file(existing_files=current_existing, timeout=timeout)
+            downloaded_files.append(dl_file)
+            current_existing.add(str(dl_file.resolve()))
+            time.sleep(1.0)
+
+        return downloaded_files
 
     def wait_for_downloaded_file(self, existing_files: set[str], timeout: int = 60) -> Path:
         """Memantau folder unduhan sampai berkas gambar .jpg baru selesai diunduh secara utuh.
@@ -2061,6 +2201,8 @@ def generate_image(
         debug=debug,
         **kwargs,
     )
+    if len(res.file_paths) > 1:
+        return res.file_paths
     return res.file_path
 
 
@@ -2092,8 +2234,8 @@ def generate(
         debug (bool): Simpan tangkapan layar debug visual (default: False).
 
     Returns:
-        GenerationResult: Objek terstruktur berisi file_path, prompt, model, aspect_ratio, count,
-                          attempt, dan duration_seconds.
+        GenerationResult: Objek terstruktur berisi file_path, file_paths, prompt, model, aspect_ratio,
+                          count, attempt, dan duration_seconds.
     """
     start_ts = time.time()
     generator = ImageGenerator(
@@ -2153,44 +2295,51 @@ def generate(
                     f"Render selesai (Percobaan ke-{attempt})",
                 )
 
-                generator.click_hotbar_and_download()
+                expected_num = 1
+                try:
+                    expected_num = int(str(generator.count_str).replace("x", "").strip())
+                except Exception:
+                    expected_num = 1
+
+                downloaded_files = generator.download_all_tiles(
+                    expected_count=expected_num,
+                    existing_files=existing,
+                    timeout=60,
+                )
                 generator.capture_debug_screenshot(
-                    f"download_triggered_att_{attempt}",
-                    f"Memicu unduhan 1K (Percobaan ke-{attempt})",
+                    f"download_completed_att_{attempt}",
+                    f"Unduhan {len(downloaded_files)} gambar selesai (Percobaan ke-{attempt})",
                 )
 
-                downloaded_file = generator.wait_for_downloaded_file(existing_files=existing, timeout=60)
+                # Pemindahan seluruh berkas unduhan ke lokasi tujuan dengan penamaan resolusi standar
+                target_files: list[Path] = []
+                total_dl = len(downloaded_files)
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-                # Pemindahan berkas ke lokasi tujuan
-                if output_path is None:
-                    dest_dir = generator.workspace_dir / "outputs"
-                    dest_dir.mkdir(parents=True, exist_ok=True)
-                    slug = re.sub(r"[^\w\s-]", "", prompt)[:30].strip().replace(" ", "_")
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    target_file = dest_dir / f"{slug}_{timestamp}.jpg"
-                else:
-                    target_path = Path(output_path).resolve()
-                    if target_path.is_dir() or (not target_path.suffix and not target_path.exists()):
-                        target_path.mkdir(parents=True, exist_ok=True)
-                        slug = re.sub(r"[^\w\s-]", "", prompt)[:30].strip().replace(" ", "_")
-                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                        target_file = target_path / f"{slug}_{timestamp}.jpg"
-                    else:
-                        target_path.parent.mkdir(parents=True, exist_ok=True)
-                        target_file = target_path
+                for idx, dl_file in enumerate(downloaded_files):
+                    dest_file = resolve_target_file_path(
+                        output_path=output_path,
+                        prompt=prompt,
+                        index=idx,
+                        total_count=total_dl,
+                        workspace_dir=generator.workspace_dir,
+                        timestamp=timestamp,
+                    )
+                    shutil.move(str(dl_file), str(dest_file))
+                    target_files.append(dest_file)
 
-                shutil.move(str(downloaded_file), str(target_file))
-
-                # Hapus gambar dari kanvas peramban setelah berkas aman tersimpan
+                # Hapus SELURUH gambar dari kanvas peramban setelah berkas aman tersimpan
                 try:
-                    generator.delete_current_tile()
+                    generator.delete_all_canvas_tiles()
                     generator.capture_debug_screenshot("canvas_after_cleanup", "Pembersihan kanvas selesai")
                 except Exception as del_err:
                     console.print(f"[warning]⚠ Catatan pembersihan: {del_err}[/warning]")
 
                 duration = time.time() - start_ts
+                primary_file = target_files[0] if target_files else (generator.workspace_dir / "outputs" / "unknown.jpg")
                 return GenerationResult(
-                    file_path=target_file,
+                    file_path=primary_file,
+                    file_paths=target_files,
                     prompt=prompt,
                     model=generator.model,
                     aspect_ratio=generator.aspect_ratio,
@@ -2572,7 +2721,7 @@ def main() -> int:
     table.add_row("Batas Waktu (Timeout)", f"{timeout} detik/percobaan")
     console.print(table)
 
-    target_file = None
+    target_files: list[Path] = []
     successful_attempt = 1
     retry_delay = 12.0
     start_main_ts = time.time()
@@ -2661,39 +2810,50 @@ def main() -> int:
                         f"Render gambar selesai (Percobaan ke-{attempt})",
                     )
 
-                    progress.update(task, description="[cyan]Mengeklik hotbar opsi & memicu unduhan 1K...")
-                    generator.click_hotbar_and_download()
+                    expected_num = 1
+                    try:
+                        expected_num = int(str(generator.count_str).replace("x", "").strip())
+                    except Exception:
+                        expected_num = 1
+
+                    progress.update(
+                        task,
+                        description=f"[cyan]Memicu unduhan 1K ({expected_num} gambar)...[/cyan]",
+                    )
+                    downloaded_files = generator.download_all_tiles(
+                        expected_count=expected_num,
+                        existing_files=existing,
+                        progress_callback=lambda cur, tot: progress.update(
+                            task,
+                            description=f"[cyan]Mengunduh gambar {cur}/{tot} resolusi 1K...[/cyan]",
+                        ),
+                        timeout=60,
+                    )
                     generator.capture_debug_screenshot(
-                        f"download_triggered_att_{attempt}",
-                        f"Memicu unduhan 1K (Percobaan ke-{attempt})",
+                        f"download_completed_att_{attempt}",
+                        f"Unduhan {len(downloaded_files)} gambar selesai (Percobaan ke-{attempt})",
                     )
 
-                    progress.update(task, description="[cyan]Menunggu file .jpg di folder unduhan...")
-                    downloaded = generator.wait_for_downloaded_file(existing_files=existing, timeout=60)
-
                     progress.update(task, description="[cyan]Memindahkan file gambar ke lokasi tujuan...")
-                    if output_dest is None:
-                        dest_dir = generator.workspace_dir / "outputs"
-                        dest_dir.mkdir(parents=True, exist_ok=True)
-                        slug = re.sub(r"[^\w\s-]", "", prompt)[:30].strip().replace(" ", "_")
-                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                        target_file = dest_dir / f"{slug}_{timestamp}.jpg"
-                    else:
-                        target_path = Path(output_dest).resolve()
-                        if target_path.is_dir() or (not target_path.suffix and not target_path.exists()):
-                            target_path.mkdir(parents=True, exist_ok=True)
-                            slug = re.sub(r"[^\w\s-]", "", prompt)[:30].strip().replace(" ", "_")
-                            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                            target_file = target_path / f"{slug}_{timestamp}.jpg"
-                        else:
-                            target_path.parent.mkdir(parents=True, exist_ok=True)
-                            target_file = target_path
+                    target_files = []
+                    total_dl = len(downloaded_files)
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-                    shutil.move(str(downloaded), str(target_file))
+                    for idx, dl_file in enumerate(downloaded_files):
+                        dest_file = resolve_target_file_path(
+                            output_path=output_dest,
+                            prompt=prompt,
+                            index=idx,
+                            total_count=total_dl,
+                            workspace_dir=generator.workspace_dir,
+                            timestamp=timestamp,
+                        )
+                        shutil.move(str(dl_file), str(dest_file))
+                        target_files.append(dest_file)
 
-                    progress.update(task, description="[cyan]Menghapus gambar dari kanvas peramban (Pindahkan ke sampah)...")
+                    progress.update(task, description="[cyan]Menghapus seluruh tile dari kanvas peramban...")
                     try:
-                        generator.delete_current_tile()
+                        generator.delete_all_canvas_tiles()
                         generator.capture_debug_screenshot("canvas_after_cleanup", "Pembersihan kanvas selesai")
                     except Exception as del_err:
                         console.print(f"[warning]⚠ Catatan pembersihan: {del_err}[/warning]")
@@ -2735,12 +2895,30 @@ def main() -> int:
     summary_table.add_row("Total Durasi", f"[bold cyan]{total_duration:.1f} detik[/bold cyan]")
     if debug:
         summary_table.add_row("Dokumentasi Visual Debug", f"[bold magenta]{generator.debug_dir} (Tersimpan format .png)[/bold magenta]")
-    summary_table.add_row("Hotbar & Download 1K", "[bold green]✓ Berhasil Diunduh Resolusi Asli[/bold green]")
-    summary_table.add_row("Pembersihan Kanvas", "[bold green]✓ Dipindahkan ke Sampah[/bold green]")
-    summary_table.add_row("File Hasil Gambar", f"[bold green]{target_file}[/bold green]")
+    summary_table.add_row("Hotbar & Download 1K", f"[bold green]✓ Berhasil Diunduh ({len(target_files)} gambar resolusi 1K)[/bold green]")
+    summary_table.add_row("Pembersihan Kanvas", "[bold green]✓ Seluruh Tile Dipindahkan ke Sampah[/bold green]")
+
+    if len(target_files) == 1:
+        files_display = f"[bold green]{target_files[0]}[/bold green]"
+    else:
+        files_display = "\n".join(f"[bold green]• {f}[/bold green]" for f in target_files)
+
+    summary_table.add_row(
+        "File Hasil Gambar" if len(target_files) <= 1 else f"File Hasil Gambar ({len(target_files)})",
+        files_display,
+    )
     console.print(summary_table)
 
     debug_extra = f"\n[muted]Folder Debug:[/muted] [magenta]{generator.debug_dir}[/magenta]" if debug else ""
+    if len(target_files) == 1:
+        file_banner_lines = f"[muted]Lokasi Berkas:[/muted] [white]{target_files[0]}[/white]\n"
+    else:
+        file_banner_lines = (
+            f"[muted]Lokasi Berkas ({len(target_files)} gambar):[/muted]\n"
+            + "\n".join(f"  [green]•[/green] [white]{f}[/white]" for f in target_files)
+            + "\n"
+        )
+
     console.print(
         Panel(
             f"[bold green]BERHASIL MENGHASILKAN & MENGUNDUH GAMBAR SECARA SENYAP![/bold green]\n\n"
@@ -2748,7 +2926,7 @@ def main() -> int:
             f"[muted]Model:[/muted] [gold]🍌 {generator.model}[/gold]  |  "
             f"[muted]Rasio:[/muted] [magenta]{generator.aspect_ratio}[/magenta]  |  "
             f"[muted]Variasi:[/muted] [green]{generator.count_str}[/green]\n"
-            f"[muted]Lokasi Berkas:[/muted] [white]{target_file}[/white]\n"
+            f"{file_banner_lines}"
             f"[muted]Percobaan:[/muted] [green]Berhasil pada percobaan ke-{successful_attempt} ({total_duration:.1f}s)[/green]\n"
             f"[muted]Kursor Mouse:[/muted] [green]Tidak tersentuh sama sekali selama proses berlangsung[/green]"
             f"{debug_extra}",
