@@ -92,13 +92,25 @@ if (-not (Test-Path $ffBin) -or -not (Test-Path $profileDir)) {
     Push-Location $subRepo
     & $pythonCmd -m pip install -r requirements.txt --quiet
     & $pythonCmd setup_browser.py
+    $setupCode = $LASTEXITCODE
     Pop-Location
 
-    Write-Host "      Menyalin biner dan profil ke direktori image-generator..." -ForegroundColor Cyan
-    Copy-Item -Path ".\firefox-stealth-automation\browser_profile" -Destination ".\" -Recurse -Force
-    Copy-Item -Path ".\firefox-stealth-automation\firefox_portable" -Destination ".\" -Recurse -Force
+    $srcProfile = ".\firefox-stealth-automation\browser_profile"
+    $srcPortable = ".\firefox-stealth-automation\firefox_portable"
+
+    if ($setupCode -eq 0 -and (Test-Path "$srcPortable\App\Firefox64\firefox.exe")) {
+        Write-Host "      Menyalin biner dan profil ke direktori image-generator..." -ForegroundColor Cyan
+        Copy-Item -Path $srcProfile -Destination ".\" -Recurse -Force
+        Copy-Item -Path $srcPortable -Destination ".\" -Recurse -Force
+        Write-Host "      ✓ Firefox Portable Stealth & profil telah siap." -ForegroundColor Green
+    } else {
+        Write-Host "      ✗ Gagal mengunduh atau mengekstrak Firefox Portable." -ForegroundColor Red
+        Write-Host "      Silakan periksa koneksi internet Anda dan jalankan kembali instalasi." -ForegroundColor Yellow
+        exit 1
+    }
+} else {
+    Write-Host "      ✓ Firefox Portable Stealth & profil telah siap." -ForegroundColor Green
 }
-Write-Host "      ✓ Firefox Portable Stealth & profil telah siap." -ForegroundColor Green
 
 Write-Host ""
 Write-Host "==============================================================================" -ForegroundColor Green

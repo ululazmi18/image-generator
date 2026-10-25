@@ -363,152 +363,170 @@ def automated_google_login(
                 spinner="dots",
             ):
                 while time.time() - start_wait_auth < max_timeout:
-                    curr_url = page.url
-                    parsed = urlparse(curr_url)
+                    try:
+                        curr_url = page.url
+                        parsed = urlparse(curr_url)
 
-                    # 1. Cek jika terjadi penolakan oleh Google
-                    if "signin/rejected" in curr_url:
-                        console.print(
-                            "\n[error]✗ Google menolak akses (signin/rejected). Lingkungan tidak lolos verifikasi.[/error]"
-                        )
-                        browser.close()
-                        return False
+                        # 1. Cek jika terjadi penolakan oleh Google
+                        if "signin/rejected" in curr_url:
+                            console.print(
+                                "\n[error]✗ Google menolak akses (signin/rejected). Lingkungan tidak lolos verifikasi.[/error]"
+                            )
+                            browser.close()
+                            return False
 
-                    # 2. Cek jika berhasil masuk ke kanvas Google Flow (host flow.google.com bukan sekadar query continue)
-                    is_flow_canvas = (
-                        parsed.netloc == "flow.google.com"
-                        or parsed.netloc.endswith(".flow.google.com")
-                    ) and not parsed.path.startswith("/about")
-
-                    if is_flow_canvas:
-                        console.print("\n[success]✓ BERHASIL TERAUTENTIKASI DI GOOGLE FLOW![/success]")
-                        time.sleep(3)
-                        cookies = context.cookies()
-                        saved_count = save_playwright_cookies_to_firefox(cookies, profile_dir)
-                        console.print(
-                            f"[success]✓ {saved_count} token cookie berhasil disimpan ke [cyan]browser_profile/cookies.sqlite[/cyan]![/success]"
-                        )
-                        browser.close()
-
-                        # Jalankan verifikasi headless mandiri menggunakan engine Firefox Portable
-                        console.print("[info]Memverifikasi kompatibilitas profil pada Firefox Portable...[/info]")
-                        ver = verify_session_headless()
-                        _print_verify_result(ver)
-                        return True
-
-                    # 3. Lewati dialog opsional Google seperti 'Not now' / 'Protect your account'
-                    skip_btn = page.query_selector(
-                        "button:has-text('Not now'), button:has-text('Jangan sekarang'), button:has-text('Skip'), button:has-text('Lewati')"
-                    )
-                    if skip_btn and skip_btn.is_visible():
-                        try:
-                            skip_btn.click()
+                        # 2. Redirect jika mendarat di myaccount.google.com
+                        if "myaccount.google.com" in curr_url:
+                            try:
+                                page.goto(FLOW_HOME_URL, wait_until="commit")
+                            except Exception:
+                                pass
                             time.sleep(2)
-                        except Exception:
-                            pass
+                            continue
 
-                    # 4. Cek apakah layar meminta 2FA / verifikasi
-                    page_text = page.inner_text("body")
+                        # 3. Cek jika berhasil masuk ke kanvas Google Flow (host flow.google.com bukan sekadar query continue)
+                        is_flow_canvas = (
+                            parsed.netloc == "flow.google.com"
+                            or parsed.netloc.endswith(".flow.google.com")
+                        ) and not parsed.path.startswith("/about")
 
-                    # Cek prompt input kode PIN (SMS / Authenticator)
-                    pin_input = page.query_selector(
-                        "input#idvPin, input[name='Pin'], input[type='tel'], input#totpPin"
-                    )
-                    if pin_input and pin_input.is_visible():
-                        console.print(
-                            "\n[gold]📱 Google meminta 6-digit kode verifikasi (SMS / Google Authenticator):[/gold]"
+                        if is_flow_canvas:
+                            console.print("\n[success]✓ BERHASIL TERAUTENTIKASI DI GOOGLE FLOW![/success]")
+                            time.sleep(3)
+                            cookies = context.cookies()
+                            saved_count = save_playwright_cookies_to_firefox(cookies, profile_dir)
+                            console.print(
+                                f"[success]✓ {saved_count} token cookie berhasil disimpan ke [cyan]browser_profile/cookies.sqlite[/cyan]![/success]"
+                            )
+                            browser.close()
+
+                            # Jalankan verifikasi headless mandiri menggunakan engine Firefox Portable
+                            console.print("[info]Memverifikasi kompatibilitas profil pada Firefox Portable...[/info]")
+                            ver = verify_session_headless()
+                            _print_verify_result(ver)
+                            return True
+
+                        # 4. Lewati dialog opsional Google seperti 'Not now' / 'Protect your account'
+                        skip_btn = page.query_selector(
+                            "button:has-text('Not now'), button:has-text('Jangan sekarang'), button:has-text('Skip'), button:has-text('Lewati')"
                         )
-                        code = Prompt.ask("[cyan]Masukkan Kode Verifikasi[/cyan]")
-                        pin_input.fill(code.strip())
-                        pin_next = page.query_selector(
-                            "#idvPreregisteredPhoneNext, #totpNext, button[jsname='LgbsSe']"
+                        if skip_btn and skip_btn.is_visible():
+                            try:
+                                skip_btn.click()
+                                time.sleep(2)
+                            except Exception:
+                                pass
+
+                        # 5. Cek apakah layar meminta 2FA / verifikasi
+                        page_text = page.inner_text("body")
+
+                        # Cek prompt input kode PIN (SMS / Authenticator)
+                        pin_input = page.query_selector(
+                            "input#idvPin, input[name='Pin'], input[type='tel'], input#totpPin"
                         )
-                        if pin_next:
-                            pin_next.click()
-                        else:
-                            page.keyboard.press("Enter")
-                        time.sleep(4)
-                        continue
+                        if pin_input and pin_input.is_visible():
+                            console.print(
+                                "\n[gold]📱 Google meminta 6-digit kode verifikasi (SMS / Google Authenticator):[/gold]"
+                            )
+                            code = Prompt.ask("[cyan]Masukkan Kode Verifikasi[/cyan]")
+                            pin_input.fill(code.strip())
+                            pin_next = page.query_selector(
+                                "#idvPreregisteredPhoneNext, #totpNext, button[jsname='LgbsSe']"
+                            )
+                            if pin_next:
+                                pin_next.click()
+                            else:
+                                page.keyboard.press("Enter")
+                            time.sleep(4)
+                            continue
 
-                    # Cek prompt input email pemulihan
-                    rec_input = page.query_selector(
-                        "input#knowledge-preregistered-email-response, input[name='knowledgePreregisteredEmailResponse']"
-                    )
-                    if rec_input and rec_input.is_visible():
-                        console.print("\n[gold]📧 Google meminta konfirmasi email pemulihan:[/gold]")
-                        rec_val = Prompt.ask("[cyan]Masukkan Email Pemulihan[/cyan]")
-                        rec_input.fill(rec_val.strip())
-                        rec_input.press("Enter")
-                        time.sleep(3)
-                        continue
+                        # Cek prompt input email pemulihan
+                        rec_input = page.query_selector(
+                            "input#knowledge-preregistered-email-response, input[name='knowledgePreregisteredEmailResponse']"
+                        )
+                        if rec_input and rec_input.is_visible():
+                            console.print("\n[gold]📧 Google meminta konfirmasi email pemulihan:[/gold]")
+                            rec_val = Prompt.ask("[cyan]Masukkan Email Pemulihan[/cyan]")
+                            rec_input.fill(rec_val.strip())
+                            rec_input.press("Enter")
+                            time.sleep(3)
+                            continue
 
-                    # Cek prompt notifikasi perangkat (Tap Yes / Match Number)
-                    is_2fa_screen = any(
-                        kw in page_text.lower()
-                        for kw in [
-                            "check your",
-                            "periksa ponsel",
-                            "periksa tablet",
-                            "ketuk ya",
-                            "tap yes",
-                            "2-step",
-                            "2 langkah",
-                            "verifikasi 2 langkah",
-                            "verifikasi perangkat",
-                            "google sent a notification",
-                            "google mengirim notifikasi",
-                            "mengirimkan notifikasi",
-                            "pilih angka",
-                            "select the number",
-                            "verify it's you",
-                            "verifikasi bahwa ini memang anda",
-                        ]
-                    )
+                        # Cek prompt notifikasi perangkat (Tap Yes / Match Number)
+                        is_2fa_screen = any(
+                            kw in page_text.lower()
+                            for kw in [
+                                "check your",
+                                "periksa ponsel",
+                                "periksa tablet",
+                                "ketuk ya",
+                                "tap yes",
+                                "2-step",
+                                "2 langkah",
+                                "verifikasi 2 langkah",
+                                "verifikasi perangkat",
+                                "google sent a notification",
+                                "google mengirim notifikasi",
+                                "mengirimkan notifikasi",
+                                "pilih angka",
+                                "select the number",
+                                "verify it's you",
+                                "verifikasi bahwa ini memang anda",
+                            ]
+                        )
 
-                    if is_2fa_screen and not notified_2fa:
-                        notified_2fa = True
-                        # Ekstrak nomor pencocokan jika ada (misal Google menampilkan angka '42')
-                        match_num = None
-                        for sel in [
-                            ".f9UGee",
-                            "div[data-number]",
-                            "div[data-challengeinfo] div",
-                            "span[data-number]",
-                            "span[jsname='V67aGc']",
-                            "div.BqLWCe",
-                        ]:
-                            for el_num in page.query_selector_all(sel):
-                                txt = el_num.inner_text().strip()
-                                if txt.isdigit() and 1 <= len(txt) <= 3:
-                                    match_num = txt
+                        if is_2fa_screen and not notified_2fa:
+                            notified_2fa = True
+                            # Ekstrak nomor pencocokan jika ada (misal Google menampilkan angka '42')
+                            match_num = None
+                            for sel in [
+                                ".f9UGee",
+                                "div[data-number]",
+                                "div[data-challengeinfo] div",
+                                "span[data-number]",
+                                "span[jsname='V67aGc']",
+                                "div.BqLWCe",
+                            ]:
+                                try:
+                                    for el_num in page.query_selector_all(sel):
+                                        txt = el_num.inner_text().strip()
+                                        if txt.isdigit() and 1 <= len(txt) <= 3:
+                                            match_num = txt
+                                            break
+                                except Exception:
+                                    pass
+                                if match_num:
                                     break
+
+                            if not match_num:
+                                # Cari angka 2 digit yang berdiri sendiri di teks instruksi
+                                m = re.search(
+                                    r"(?:ketuk|tap|pilih|choose|select|angka|nomor)\s*[:\s]*(\d{1,3})\b",
+                                    page_text,
+                                    re.IGNORECASE,
+                                )
+                                if m:
+                                    match_num = m.group(1)
+
+                            panel_msg = (
+                                "[bold yellow]📱 KONFIRMASI VERIFIKASI 2-LANGKAH (2FA) GOOGLE[/bold yellow]\n\n"
+                                "Google mengirimkan permintaan verifikasi ke ponsel/perangkat Anda.\n"
+                            )
                             if match_num:
-                                break
+                                panel_msg += (
+                                    f"[white]Silakan buka ponsel Anda, ketuk [bold green]Ya[/bold green], "
+                                    f"dan pilih angka:[/white] [bold gold underline] {match_num} [/bold gold underline]\n"
+                                )
+                            else:
+                                panel_msg += "[white]Silakan buka ponsel Anda dan ketuk [bold green]Ya, itu saya[/bold green].[/white]\n"
 
-                        if not match_num:
-                            # Cari angka 2 digit yang berdiri sendiri di teks instruksi
-                            m = re.search(
-                                r"(?:ketuk|tap|pilih|choose|select|angka|nomor)\s*[:\s]*(\d{1,3})\b",
-                                page_text,
-                                re.IGNORECASE,
-                            )
-                            if m:
-                                match_num = m.group(1)
+                            panel_msg += "\n[muted]Terminal memantau persetujuan secara otomatis...[/muted]"
+                            console.print(Panel(panel_msg, box=box.ROUNDED, title="[yellow]Aksi Pengguna Diperlukan[/yellow]"))
 
-                        panel_msg = (
-                            "[bold yellow]📱 KONFIRMASI VERIFIKASI 2-LANGKAH (2FA) GOOGLE[/bold yellow]\n\n"
-                            "Google mengirimkan permintaan verifikasi ke ponsel/perangkat Anda.\n"
-                        )
-                        if match_num:
-                            panel_msg += (
-                                f"[white]Silakan buka ponsel Anda, ketuk [bold green]Ya[/bold green], "
-                                f"dan pilih angka:[/white] [bold gold underline] {match_num} [/bold gold underline]\n"
-                            )
-                        else:
-                            panel_msg += "[white]Silakan buka ponsel Anda dan ketuk [bold green]Ya, itu saya[/bold green].[/white]\n"
-
-                        panel_msg += "\n[muted]Terminal memantau persetujuan secara otomatis...[/muted]"
-                        console.print(Panel(panel_msg, box=box.ROUNDED, title="[yellow]Aksi Pengguna Diperlukan[/yellow]"))
+                    except Exception as loop_err:
+                        # Tangani transisi navigasi (execution context destroyed saat user konfirmasi di ponsel)
+                        time.sleep(1.5)
+                        continue
 
                     time.sleep(2.0)
 
