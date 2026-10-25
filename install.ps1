@@ -118,9 +118,28 @@ Write-Host " ✓ INSTALASI LENGKAP & BERHASIL DISIAPKAN!" -ForegroundColor Green
 Write-Host "==============================================================================" -ForegroundColor Green
 Write-Host ""
 
+# [LANGKAH OPSIONAL] AUTENTIKASI AKUN GOOGLE (DELEGASI KE FIREFOX STEALTH AUTOMATION)
+$hasCookies = (Test-Path "browser_profile\cookies.sqlite")
+if (-not $hasCookies -or ((Get-Item "browser_profile\cookies.sqlite" -ErrorAction SilentlyContinue).Length -lt 1024)) {
+    Write-Host " [INFO] Akun Google belum terhubung di instalasi baru ini." -ForegroundColor Cyan
+    Write-Host " Otomasi siap menghubungkannya secara Full CLI via firefox-stealth-automation." -ForegroundColor White
+    $doLogin = Read-Host "Apakah Anda ingin menghubungkan akun Google Flow sekarang? (Y/n)"
+    if ($doLogin -ne "n" -and $doLogin -ne "N") {
+        if (Test-Path ".\firefox-stealth-automation\login.py") {
+            & $pythonCmd .\firefox-stealth-automation\login.py
+            if (Test-Path ".\firefox-stealth-automation\browser_profile\cookies.sqlite") {
+                Copy-Item -Path ".\firefox-stealth-automation\browser_profile\cookies.sqlite" -Destination ".\browser_profile\cookies.sqlite" -Force
+            }
+        }
+    }
+}
+
 Write-Host ""
 Write-Host "==============================================================================" -ForegroundColor Green
 Write-Host " 🚀 GENERATOR SIAP DIGUNAKAN SECARA SENYAP (SILENT BACKGROUND):" -ForegroundColor Green
 Write-Host "   .\run.bat -a 16:9 -m pro -p `"pemandangan fajar di puncak gunung berapi`"" -ForegroundColor Yellow
 Write-Host "   python image_generator.py -a 1:1 -m pro -p `"kucing astronot di bulan`"" -ForegroundColor Yellow
+Write-Host ""
+Write-Host " Hubungkan / perbarui akun Google kapan saja via CLI:" -ForegroundColor Cyan
+Write-Host "   python .\firefox-stealth-automation\login.py" -ForegroundColor Yellow
 Write-Host "==============================================================================" -ForegroundColor Green
