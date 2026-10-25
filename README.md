@@ -117,16 +117,14 @@ Copy-Item -Path ".\firefox-stealth-automation\firefox_portable" -Destination ".\
 
 ---
 
-### Langkah 4: Autentikasi Akun Google ke Google Flow (100% Otomasi Terminal)
-Cukup jalankan runner autentikasi yang telah disediakan:
+### Langkah 4: Autentikasi Akun Google ke Google Flow
+Autentikasi akun Google dikelola secara mandiri oleh modul `firefox-stealth-automation`:
 ```powershell
-.\login.bat
+python .\firefox-stealth-automation\login.py
 ```
-*(Atau via baris perintah langsung: `python login_cli.py --auto`)*.
-
-1. Masukkan email dan kata sandi akun Google Anda secara aman langsung di terminal.
-2. Skrip secara otomatis menembus sistem keamanan Google Sign-In, mendeteksi verifikasi 2FA jika diminta (cukup ketuk Ya / pilih angka di ponsel Anda), dan menyimpan seluruh token sesi ke `browser_profile/cookies.sqlite`.
-3. Setelah sesi terhubung, sistem langsung memverifikasi kompatibilitas secara senyap (*headless*) dan siap digunakan untuk membuat gambar!
+1. Masukkan email dan kata sandi akun Google Anda langsung di terminal.
+2. Otomasi Full CLI berjalan di latar belakang, mendeteksi verifikasi 2FA jika diminta (cukup ketuk Ya / pilih angka di ponsel Anda), dan menyimpan token sesi ke `browser_profile/cookies.sqlite`.
+3. Setelah sesi terhubung, sistem langsung siap digunakan untuk membuat gambar.
 
 ---
 

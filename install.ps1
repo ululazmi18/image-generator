@@ -117,19 +117,6 @@ Write-Host "====================================================================
 Write-Host " ✓ INSTALASI LENGKAP & BERHASIL DISIAPKAN!" -ForegroundColor Green
 Write-Host "==============================================================================" -ForegroundColor Green
 Write-Host ""
-# [LANGKAH TERAKHIR] AUTENTIKASI AKUN GOOGLE KE GOOGLE FLOW
-Write-Host " [LANGKAH TERAKHIR] Memeriksa status akun Google Flow..." -ForegroundColor Yellow
-& $pythonCmd login_cli.py --verify
-if ($LASTEXITCODE -ne 0) {
-    Write-Host ""
-    Write-Host " [INFO] Akun Google belum terhubung di instalasi baru ini." -ForegroundColor Cyan
-    Write-Host " Otomasi siap menghubungkannya: Cukup masukkan email & sandi di terminal." -ForegroundColor White
-    $doLogin = Read-Host "Apakah Anda ingin menghubungkan akun Google Flow sekarang? (Y/n)"
-    if ($doLogin -ne "n" -and $doLogin -ne "N") {
-        & $pythonCmd login_cli.py --auto
-    }
-}
-
 
 Write-Host ""
 Write-Host "==============================================================================" -ForegroundColor Green
