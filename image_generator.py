@@ -1119,6 +1119,58 @@ class ImageGenerator:
         time.sleep(3.5)
         return True
 
+    def get_current_user_email(self) -> str | None:
+        """Mendeteksi dan mengembalikan alamat email akun Google yang sedang aktif di Google Flow.
+
+        Mengekstrak informasi dari:
+        1. Atribut internal self.email (jika ditentukan via flag/login).
+        2. Elemen profil/avatar Google di DOM halaman aktif (aria-label atau title).
+        3. Regex pemindaian alamat email pengguna pada dokumen DOM.
+
+        Returns:
+            str | None: Alamat email pengguna aktif atau None jika tidak terdeteksi.
+        """
+        if getattr(self, "email", None) and "@" in str(self.email):
+            return str(self.email).strip()
+
+        detect_script = """
+        // 1. Cek tombol atau avatar profil akun Google (memuat aria-label: 'Akun Google: Nama (email@gmail.com)')
+        const profileElements = Array.from(document.querySelectorAll('button, a, img, div, span'));
+        for (const el of profileElements) {
+            const aria = (el.getAttribute('aria-label') || el.getAttribute('title') || '').trim();
+            if (aria.includes('@')) {
+                const match = aria.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})/);
+                if (match) return match[1];
+            }
+        }
+
+        // 2. Pemindaian regex fallback pada struktur dokumen
+        try {
+            const html = document.documentElement ? document.documentElement.innerHTML : '';
+            const matches = html.match(/[a-zA-Z0-9._%+-]+@(?:gmail\\.com|[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})/g);
+            if (matches) {
+                const filtered = Array.from(new Set(matches)).filter(e => {
+                    const low = e.toLowerCase();
+                    return !low.includes('google.com') && !low.includes('example.com') &&
+                           !low.includes('sentry') && !low.includes('schema.org') &&
+                           !low.includes('w3.org') && !low.includes('github.com');
+                });
+                if (filtered.length > 0) return filtered[0];
+            }
+        } catch (e) {}
+
+        return null;
+        """
+        try:
+            detected = self.driver.execute_script(detect_script)
+            if detected and isinstance(detected, str) and "@" in detected:
+                self.email = detected.strip()
+                return self.email
+        except Exception:
+            pass
+
+        return getattr(self, "email", None) or os.environ.get("GOOGLE_EMAIL")
+
     def open_or_create_project(self, target_project_name: str = "images generator") -> bool:
         """Mencari proyek dengan nama target di dasbor, atau membuka proyek yang ada / membuat baru.
 
@@ -2986,6 +3038,9 @@ def main() -> int:
         generator.ensure_browser()
         generator.connect()
         generator.find_flow_tab()
+        active_email = generator.get_current_user_email()
+        if active_email:
+            console.print(f"[info]ℹ Akun Google Flow terhubung:[/info] [bold cyan]{active_email}[/bold cyan]")
         generator.capture_debug_screenshot("01_canvas_ready", "Kondisi awal kanvas siap")
     except Exception as init_err:
         console.print(f"\n[error]✗ Kegagalan Otomasi:[/error] {init_err}")
@@ -3122,15 +3177,17 @@ def main() -> int:
                         f"Batas penggunaan tercapai: {quota_err}",
                     )
                     generator.delete_all_canvas_tiles()
+                    curr_email = generator.get_current_user_email() or "Tidak terdeteksi"
                     console.print(
                         Panel(
-                            "[bold red]Akun Google Flow Anda telah mencapai batas penggunaan (Quota / Rate Limit).[/bold red]\n\n"
-                            f"[yellow]Pesan dari Google Flow:[/yellow] [white]{quota_err}[/white]\n\n"
+                            f"[bold red]Akun Google Flow Anda telah mencapai batas penggunaan (Quota / Rate Limit).[/bold red]\n\n"
+                            f"[bold cyan]• Akun Aktif Saat Ini:[/bold cyan] [bold white]{curr_email}[/bold white]\n"
+                            f"[yellow]• Pesan dari Google Flow:[/yellow] [white]{quota_err}[/white]\n\n"
                             "[bold white]Petunjuk & Saran Solusi:[/bold white]\n"
-                            "• Akun ini sedang dibatasi sementara oleh Google Flow. Silakan coba kembali beberapa saat lagi.\n"
+                            f"• Akun [cyan]{curr_email}[/cyan] sedang dibatasi sementara oleh Google Flow. Silakan coba kembali beberapa saat lagi.\n"
                             "• Atau gunakan akun Google lain dengan memasukkan kredensial baru melalui flag:\n"
                             "  [cyan]python image_generator.py --email akun_lain@gmail.com ...[/cyan]",
-                            title="[bold red]Batas Penggunaan Google Flow Tercapai[/bold red]",
+                            title=f"[bold red]Batas Penggunaan Google Flow Tercapai ({curr_email})[/bold red]",
                             box=box.ROUNDED,
                         )
                     )
@@ -3164,6 +3221,9 @@ def main() -> int:
     summary_table.add_column("Komponen", style="cyan")
     summary_table.add_column("Status / Lokasi", style="bold")
     summary_table.add_row("Status Generasi", "[bold green]✓ Selesai & Terverifikasi[/bold green]")
+    active_user_email = generator.get_current_user_email()
+    if active_user_email:
+        summary_table.add_row("Akun Google Digunakan", f"[bold cyan]{active_user_email}[/bold cyan]")
     summary_table.add_row("Model AI Terpilih", f"[bold gold]🍌 {generator.model}[/bold gold]")
     summary_table.add_row("Aspek Rasio Terpasang", f"[bold magenta]{generator.aspect_ratio}[/bold magenta]")
     summary_table.add_row("Kuantitas Gambar", f"[bold green]{generator.count_str}[/bold green]")
@@ -3197,11 +3257,12 @@ def main() -> int:
             + "\n"
         )
 
+    acc_banner_part = f"[muted]Akun Google:[/muted] [cyan]{active_user_email}[/cyan]  |  " if active_user_email else ""
     console.print(
         Panel(
             f"[bold green]BERHASIL MENGHASILKAN & MENGUNDUH GAMBAR SECARA SENYAP![/bold green]\n\n"
             f"[muted]Prompt:[/muted] [gold]{prompt}[/gold]\n"
-            f"[muted]Model:[/muted] [gold]🍌 {generator.model}[/gold]  |  "
+            f"{acc_banner_part}[muted]Model:[/muted] [gold]🍌 {generator.model}[/gold]  |  "
             f"[muted]Rasio:[/muted] [magenta]{generator.aspect_ratio}[/magenta]  |  "
             f"[muted]Variasi:[/muted] [green]{generator.count_str}[/green]\n"
             f"{file_banner_lines}"
