@@ -1131,20 +1131,12 @@ class ImageGenerator:
         time.sleep(3.5)
         return True
 
-    def get_current_user_email(self) -> str | None:
-        """Mendeteksi dan mengembalikan alamat email akun Google yang sedang aktif di Google Flow.
-
-        Mengekstrak informasi dari:
-        1. Atribut internal self.email (jika ditentukan via flag/login).
-        2. Elemen profil/avatar Google di DOM halaman aktif (aria-label atau title).
-        3. Regex pemindaian alamat email pengguna pada dokumen DOM.
+    def detect_browser_active_email(self) -> str | None:
+        """Mendeteksi alamat email akun Google yang benar-benar sedang aktif di dalam peramban (murni dari DOM).
 
         Returns:
-            str | None: Alamat email pengguna aktif atau None jika tidak terdeteksi.
+            str | None: Alamat email yang aktif di DOM peramban, atau None jika belum login / tidak terdeteksi.
         """
-        if getattr(self, "email", None) and "@" in str(self.email):
-            return str(self.email).strip()
-
         detect_script = """
         // 1. Cek tombol atau avatar profil akun Google (memuat aria-label: 'Akun Google: Nama (email@gmail.com)')
         const profileElements = Array.from(document.querySelectorAll('button, a, img, div, span'));
@@ -1176,10 +1168,23 @@ class ImageGenerator:
         try:
             detected = self.driver.execute_script(detect_script)
             if detected and isinstance(detected, str) and "@" in detected:
-                self.email = detected.strip()
-                return self.email
+                return detected.strip()
         except Exception:
             pass
+        return None
+
+    def get_current_user_email(self) -> str | None:
+        """Mengembalikan alamat email akun Google yang aktif.
+
+        Mendahulukan deteksi langsung dari DOM peramban untuk mencegah false positive
+        dari argumen CLI. Jika DOM tidak dapat dipindai, menggunakan fallback self.email.
+
+        Returns:
+            str | None: Alamat email pengguna aktif atau None.
+        """
+        dom_email = self.detect_browser_active_email()
+        if dom_email:
+            return dom_email
 
         return getattr(self, "email", None) or os.environ.get("GOOGLE_EMAIL")
 
@@ -1295,29 +1300,26 @@ class ImageGenerator:
             bool: True jika akun siap digunakan.
         """
         target = requested_email or getattr(self, "email", None)
-        if not target or "@" not in str(target):
-            # Jika tidak ada target spesifik, cadangkan sesi aktif saat ini jika ada
-            curr = self.get_current_user_email()
-            if curr:
-                self.save_account_to_vault(curr)
-            return True
+        curr_active = (self.detect_browser_active_email() or "").strip().lower()
 
-        target_clean = str(target).strip().lower()
-        curr_active = (self.get_current_user_email() or "").strip().lower()
-
-        # Selalu cadangkan sesi akun aktif saat ini ke brankas
+        # Selalu cadangkan sesi akun aktif saat ini ke brankas jika terdeteksi
         if curr_active:
             self.save_account_to_vault(curr_active)
 
-        # Jika akun yang diminta sama dengan akun aktif, tidak perlu tindakan
+        if not target or "@" not in str(target):
+            return True
+
+        target_clean = str(target).strip().lower()
+
+        # Jika akun yang diminta sama persis dengan akun aktif di peramban, tidak perlu tindakan
         if curr_active and curr_active == target_clean:
             return True
 
         console.print(
             Panel(
                 f"[bold cyan]PERMINTAAN PERGANTIAN AKUN GOOGLE FLOW[/bold cyan]\n\n"
-                f"• Akun Aktif Saat Ini : [yellow]{curr_active or 'Belum terdeteksi'}[/yellow]\n"
-                f"• Akun Target Diminta : [bold green]{target}[/bold green]",
+                f"• Akun Aktif di Peramban : [yellow]{curr_active or 'Belum terdeteksi'}[/yellow]\n"
+                f"• Akun Target Diminta    : [bold green]{target}[/bold green]",
                 box=box.ROUNDED,
                 title="[cyan]Account Vault Switcher[/cyan]",
             )
