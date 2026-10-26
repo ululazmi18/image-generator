@@ -353,11 +353,13 @@ def resolve_target_file_path(
 # PENGECUALIAN KHUSUS OTOMASI (CUSTOM EXCEPTIONS)
 # ==============================================================================
 class GenerationFailedError(RuntimeError):
-    """Pengecualian yang dilemparkan saat Google Flow menampilkan tile galat/gagal di kanvas.
+    """Pengecualian yang dilemparkan saat Google Flow menampilkan tile galat/gagal di kanvas."""
 
-    Misalnya jika terdeteksi teks 'Gagal', 'Anda telah mencapai batas penggunaan',
-    atau kegagalan komputasi server pembuatan gambar lainnya.
-    """
+    pass
+
+
+class QuotaExceededError(GenerationFailedError):
+    """Pengecualian yang dilemparkan saat akun Google Flow mencapai batas penggunaan (rate limit / quota)."""
 
     pass
 
@@ -2042,6 +2044,9 @@ class ImageGenerator:
                 if failed_msg:
                     self.capture_debug_screenshot("tile_render_failed", f"Tile gagal terdeteksi: {failed_msg}")
                     time.sleep(1.0)
+                    failed_lower = failed_msg.lower()
+                    if any(k in failed_lower for k in ["batas penggunaan", "quota", "rate limit", "coba lagi nanti", "usage limit"]):
+                        raise QuotaExceededError(failed_msg)
                     raise GenerationFailedError(failed_msg)
 
                 current_prog = st.get("progress")
@@ -3098,15 +3103,39 @@ def main() -> int:
                     successful_attempt = attempt
                     break
 
+                except QuotaExceededError as quota_err:
+                    generator.capture_debug_screenshot(
+                        f"quota_exceeded_att_{attempt}",
+                        f"Batas penggunaan tercapai: {quota_err}",
+                    )
+                    generator.delete_all_canvas_tiles()
+                    console.print(
+                        Panel(
+                            "[bold red]Akun Google Flow Anda telah mencapai batas penggunaan (Quota / Rate Limit).[/bold red]\n\n"
+                            f"[yellow]Pesan dari Google Flow:[/yellow] [white]{quota_err}[/white]\n\n"
+                            "[bold white]Petunjuk & Saran Solusi:[/bold white]\n"
+                            "• Akun ini sedang dibatasi sementara oleh Google Flow. Silakan coba kembali beberapa saat lagi.\n"
+                            "• Atau gunakan akun Google lain dengan memasukkan kredensial baru melalui flag:\n"
+                            "  [cyan]python image_generator.py --email akun_lain@gmail.com ...[/cyan]",
+                            title="[bold red]Batas Penggunaan Google Flow Tercapai[/bold red]",
+                            box=box.ROUNDED,
+                        )
+                    )
+                    return 1
+
                 except (GenerationFailedError, TimeoutError) as attempt_err:
                     generator.capture_debug_screenshot(
                         f"failure_state_att_{attempt}",
                         f"Visual kegagalan (Percobaan ke-{attempt}): {attempt_err}",
                     )
                     generator.delete_all_canvas_tiles()
+                    console.print(
+                        f"[warning]⚠ Percobaan ke-{attempt} gagal ({attempt_err}). "
+                        f"Menunggu jeda {retry_delay:.0f} detik sebelum mencoba ulang...[/warning]"
+                    )
                     progress.update(
                         task,
-                        description=f"[warning]⚠ Percobaan ke-{attempt} gagal ({attempt_err}). Menunggu cooldown {retry_delay:.0f}s sebelum mencoba ulang...[/warning]",
+                        description=f"[warning]⚠ Percobaan ke-{attempt} gagal ({attempt_err}). Menunggu jeda {retry_delay:.0f}s...[/warning]",
                     )
                     time.sleep(retry_delay)
                     attempt += 1
