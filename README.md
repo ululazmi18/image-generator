@@ -33,13 +33,21 @@ Dukungan penuh untuk seluruh kebutuhan media sosial dan format desain:
 | **`3:4`** | `896 × 1152` px | Portrait Formal | Foto Portofolio, Poster Vertikal |
 | **`9:16`** | `768 × 1376` px | Portrait Layar Penuh | TikTok, Instagram Stories, YouTube Shorts, Reels |
 
-### 3. Kontrol Jumlah Variasi Gambar
-Hasilkan **1 hingga 4 variasi gambar** sekaligus dalam satu kali perintah menggunakan opsi `-c` atau `--count`.
+### 3. Kontrol Jumlah Variasi Gambar & Pembersihan Kanvas Total
+Hasilkan **1 hingga 4 variasi gambar** sekaligus dalam satu kali perintah menggunakan opsi `-c` atau `--count`. Setiap gambar diunduh otomatis dalam resolusi 1K dengan penamaan rapi berakhiran `-1, -2, -3, -4`, diikuti pembersihan kanvas secara menyeluruh (*Pindahkan ke sampah*) agar kanvas selalu bersih.
 
-### 4. Antarmuka Terminal Modern & Responsif
+### 4. Account Vault Switcher (Sistem Multi-Akun Super Ringan)
+- 🗄️ **Single Profile, Multi-Account Vault:** Menyimpan sesi akun Google terpisah di dalam `browser_profile/accounts/<email>/cookies.sqlite` berukuran hanya ~512 KB per akun (menghemat 99% ruang disk dibanding menduplikasi seluruh folder profil peramban).
+- 🔄 **Pergantian Akun Instan via CLI:** Cukup tambahkan parameter `--email akun_lain@gmail.com`. Jika sesi akun tersebut sudah pernah login, sistem langsung menukar sesi secara instan di latar belakang tanpa login ulang!
+- 🛡️ **Penanganan Kuota Cerdas (*Quota Guard*):** Jika kuota harian Google Flow pada akun aktif habis, sistem segera berhenti (*fast-fail*), menampilkan informasi email yang terkena limit, dan menyajikan daftar akun alternatif yang tersedia di brankas beserta panduan satu klik untuk beralih akun.
+
+### 5. Pemulihan Kanvas Mandiri (*Self-Healing Canvas Recovery*)
+Mendeteksi secara otomatis apabila tautan proyek lama kedaluwarsa atau terkena status 404 (`404?reason=project`), mereset navigasi ke beranda Google Flow, dan membuka atau membuat proyek baru yang siap pakai tanpa kegagalan otomasi.
+
+### 6. Antarmuka Terminal Modern & Responsif
 Ditenagai Rich Terminal UI dengan tabel konfigurasi visual, progress bar / spinner dinamis, notifikasi status berwarna, dan menu bantuan interaktif.
 
-### 5. Fleksibel: CLI Runner & Modul Python
+### 7. Fleksibel: CLI Runner & Modul Python
 Dapat dijalankan langsung melalui double-click runner Windows (`run.bat`), baris perintah terminal (CLI), atau diimpor langsung ke skrip Python lain.
 
 ---
@@ -165,7 +173,13 @@ python image_generator.py -c 2 -p "robot koki menyiapkan hidangan mewah"
 # 6. Menentukan Folder atau Nama Berkas Tujuan (-o / --output)
 python image_generator.py -o "outputs/mars.jpg" -p "astronot menjelajahi gua kristal merah"
 
-# 7. Mode Audit Visual Screenshot (--debug)
+# 7. Menggunakan Akun Tertentu dari Account Vault (--email)
+python image_generator.py -p "naga es terbang di atas pegunungan" --email akun_kedua@gmail.com
+
+# 8. Menghubungkan Akun Baru Sekaligus Membuat Gambar (--email dan --password)
+python image_generator.py -p "lanskap kota fajar" --email akun_baru@gmail.com --password "Rahasia123!"
+
+# 9. Mode Audit Visual Screenshot (--debug)
 python image_generator.py --debug -p "elang emas hinggap di dahan pohon pinus"
 ```
 
@@ -178,6 +192,8 @@ python image_generator.py --debug -p "elang emas hinggap di dahan pohon pinus"
 | `-a` | `--aspect-ratio`| `16:9` | Format rasio: `16:9`, `4:3`, `1:1`, `3:4`, `9:16` |
 | `-c` | `--count` | `1` | Jumlah variasi gambar yang dihasilkan (`1` s/d `4`) |
 | `-o` | `--output` | `outputs/` | Direktori atau nama berkas tujuan penyimpanan |
+| | `--email` | *None* | Alamat email target untuk menggunakan/menukar sesi dari Account Vault |
+| | `--password` | *None* | Kata sandi akun Google (opsional, jika akun baru butuh login) |
 | `-t` | `--timeout` | `180` | Batas waktu tunggu maksimal per percobaan (detik) |
 | | `--debug` | `False` | Menyimpan screenshot setiap tahap ke folder `debug/` |
 | `-h` | `--help` | | Menampilkan antarmuka panduan bantuan Rich |

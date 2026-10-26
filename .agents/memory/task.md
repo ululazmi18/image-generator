@@ -91,3 +91,17 @@
   - [x] Eliminasi berkas `login_cli.py` dan `login.bat` dari `image-generator`
   - [x] Rampingkan `requirements.txt` `image-generator` (tanpa pustaka `playwright`)
   - [x] Perbarui `install.ps1` dan `README.md` pada `image-generator`
+
+- [x] Peningkatan Sistem Multi-Akun, Penanganan Kuota & Canvas Healing (image-generator v2.2)
+  - [x] Deteksi Kanvas Rusak / Proyek 404 (`flow-project-shell` recovery ke `FLOW_HOME_URL`)
+  - [x] Penanganan Kuota Habis (`QuotaExceededError`) dengan deteksi email akun DOM & saran akun alternatif
+  - [x] Sistem Account Vault Ringan (Single Profile, multi `cookies.sqlite` ~512 KB di `browser_profile/accounts/`)
+  - [x] Parameter CLI `--email` dan `--password` untuk alur pergantian sesi instan tanpa tabrakan profil
+  - [x] Multi-Tile Download otomatis (`-c 1..4`) dengan penamaan bertingkat (`-1, -2...`) dan pembersihan massal kanvas
+  - [x] Fallback Headless Playwright Chromium otomatis
+
+- [x] Perapihan dan Persiapan Seluruh Repositori (`image-generator` & `firefox-stealth-automation`)
+  - [x] Sinkronisasi master rules dari `D:\.agents\rules\`
+  - [x] Perbaruan komprehensif `README.md` pada kedua repositori
+  - [x] Pembaruan memori proyek (`task.md`, `PRD.md`, `memory.db`)
+  - [x] Verifikasi sintaksis dan kebersihan working tree sebelum push

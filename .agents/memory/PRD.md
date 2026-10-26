@@ -9,55 +9,36 @@ Workspace `Image Generator` dirancang untuk otomasi generasi gambar berbasis per
 - **In-Folder Starter:** Pengguna dapat langsung membuka folder profil dan mengeklik berkas starter (`starter.bat` / `start_browser.bat`) untuk meluncurkan peramban dengan parameter profil yang tepat (`-no-remote -profile "%~dp0"`).
 - **Anti-Telemetry & Safe Run:** Menonaktifkan Mozilla Crash Reporter agar tidak menulis log atau membuang crash dump ke partisi `C:\`.
 
-### 3. Core Features (MVP)
-1. **Isolated Browser Profile Folder (`browser_profile`):**
-   - Kloning dari `D:\FirefoxPortable\Data\profiles\ulul_azmi`.
-   - Konfigurasi permanen `user.js` untuk port Marionette `127.0.0.1:2828`.
-   - Mengecualikan berkas kunci sementara (`parent.lock`) dan cache web berat (`cache2`).
-2. **Direct In-Folder Starter (`browser_profile\starter.bat` & `start_browser.bat`):**
-   - Meluncurkan `D:\FirefoxPortable\App\Firefox64\firefox.exe`.
-   - Menggunakan parameter otomatis `-no-remote -marionette -profile "%~dp0"`.
-3. **Image Generator Automation Module (`image_generator.py` & `Image Generator.py`):**
-   - Klien protokol Marionette native (zero-dependency socket client).
-   - Pemindai otomatis tab aktif Google Flow (`aisandbox-root` / `flow-project-shell`).
-   - Ekstraktor argumen `--prompt {teks}` yang menggabungkan seluruh kata tanpa tanda petik.
-   - Pemasukan prompt via `document.execCommand('insertText')` dan pemicuan eksekusi.
-   - Hover pada tile gambar pertama (`flow-grid-tile-container[1]`) dan pemantauan hotbar button 3 sebagai sinyal selesai.
-   - Pembukaan context menu opsi hotbar, hover submenu download ke-5, dan klik download ke-2.
-   - Pemantauan unduhan berkas `.jpg` di direktori unduhan hingga selesai dan pemindahan fleksibel ke target pemanggil.
-   - Fungsi callable: `generate_image(prompt, output_path=None, timeout=180) -> Path`.
+### 3. Core Features (v2.2 Architecture)
+1. **Isolated Single-Profile Architecture with Account Vault (`browser_profile`):**
+   - Satu direktori profil utama terisolasi (`browser_profile/`).
+   - Sistem Account Vault ringan (`browser_profile/accounts/<sanitized_email>/cookies.sqlite`), berukuran hanya ~512 KB per akun (hemat 99% disk tanpa menggandakan profil).
+   - Pergantian sesi akun instan via CLI `--email <email>` dan login akun baru via `--email` + `--password`.
+2. **Quota Guard & Fast-Fail Notification:**
+   - Deteksi dini batasan kuota Google Flow (`QuotaExceededError`).
+   - Notifikasi Rich Panel yang menampilkan email akun aktif yang terkena batas, daftar akun alternatif yang tersedia di brankas, serta perintah satu klik untuk berganti akun.
+3. **Self-Healing Canvas Recovery:**
+   - Deteksi otomatis kanvas kadaluarsa atau status 404 (`404?reason=project`) dan editor ProseMirror yang hilang.
+   - Pemulihan mandiri dengan navigasi ke `FLOW_HOME_URL` untuk membuka proyek yang valid atau membuat proyek baru.
+4. **Multi-Model & Multi-Ratio Generator:**
+   - Mendukung model AI: `pro` (Nano Banana Pro), `lite` (Nano Banana 2 Lite), `2.1` (Nano Banana 2.1).
+   - Mendukung aspek rasio: `16:9`, `4:3`, `1:1`, `3:4`, `9:16`.
+   - Multi-tile unduhan otomatis (`-c 1..4`) dengan penamaan bertingkat (`-1, -2, -3, -4`) dalam resolusi 1K.
+   - Pembersihan kanvas massal otomatis (*Pindahkan ke sampah*) setelah seluruh gambar berhasil disimpan.
+5. **Zero-Cursor Hijacking (100% Background Automation):**
+   - Injeksi teks prompt via ProseMirror DOM (`document.execCommand` + `InputEvent`).
+   - Klik tombol generate dan menu context via DOM event murni tanpa menggerakkan mouse fisik pengguna.
+   - Dual-engine browser: Firefox Portable Stealth Edition dan fallback Chromium Playwright otomatis.
 
 ### 4. User Flow
-1. Pengguna membuka peramban melalui [browser_profile\starter.bat](file:///d:/Documents/Image%20Generator/browser_profile/starter.bat).
-2. Pengguna membuka tab Google Flow ([https://labs.google/flow](https://labs.google/flow)) pada proyek yang diinginkan.
-3. Skrip pemanggil mengeksekusi fungsi `generate_image(prompt)` atau via CLI `.\image_generator.bat --prompt ... -o ...`.
-4. Skrip mengisi prompt, menekan Generate, men-hover tile hingga hotbar muncul, memicu unduhan gambar asli via context menu, dan memindahkan berkas `.jpg` ke lokasi yang ditentukan.
+1. Pengguna menjalankan runner [run.bat](run.bat) atau CLI `python image_generator.py -p "prompt" [-a rasio] [-m model] [-c count] [--email email]`.
+2. Skrip memeriksa sesi akun Google di `browser_profile/cookies.sqlite`:
+   - Jika argumen `--email` diberikan dan berbeda dari akun aktif di browser, sistem secara otomatis menukar file `cookies.sqlite` dari Account Vault.
+   - Jika akun belum ada di vault, skrip memicu autentikasi CLI headless untuk menyimpannya.
+3. Skrip memvalidasi kanvas Google Flow: jika proyek 404/rusak, otomatis dipulihkan ke proyek yang sehat dari beranda.
+4. Skrip mengisi prompt, menekan Generate, memantau hingga tile render selesai, mengunduh gambar resolusi 1K, dan membersihkan kanvas dari server.
 
-### 5. Architecture Diagram
-```mermaid
-graph TD
-    A[Caller Script / User CLI] -->|generate_image / CLI| B[image_generator.py]
-    B -->|Check / Auto-Launch| C[Firefox Portable -marionette]
-    C -->|Port 127.0.0.1:2828| D[MarionetteDriver Socket]
-    D -->|Find Tab & Switch| E[Tab Google Flow AISandbox]
-    E -->|1. Inject Prompt & Enter| F[Rich Text Editor p]
-    E -->|2. Hover & Wait Hotbar| G[flow-grid-tile-container 1]
-    E -->|3. Click Hotbar & Context Menu| H[flow-menu-item 5 Hover]
-    E -->|4. Trigger Download| I[flow-menu-item 2 Click]
-    I -->|5. Monitor & Move File| J[Target Destination File .jpg]
-```
-
-### 6. File & Directory Layout
-- `browser_profile/`: Direktori data profil Firefox (places, extensions, storage, prefs, logins).
-- `browser_profile/starter.bat`: Peluncur langsung di dalam folder profil (-marionette).
-- `browser_profile/start_browser.bat`: Alias peluncur untuk kenyamanan pengguna.
-- `browser_profile/user.js`: Konfigurasi permanen port otomasi Marionette.
-- `image_generator.py`: Modul inti dan callable function `generate_image`.
-- `Image Generator.py`: Entrypoint alternatif bernama "Image Generator".
-- `image_generator.bat` & `Image Generator.bat`: Pintasan runner batch.
-- `flow.bat`: Alias runner batch.
-- `.gitignore`: Mengabaikan `browser_profile/` dari pelacakan git.
-
-### 7. Constraints & Guardrails
-- Profil tidak boleh dilacak oleh Git karena berisi kredensial dan sesi peramban.
-- Berkas `parent.lock` wajib dibersihkan agar tidak terjadi konflik multi-instance.
+### 5. Constraints & Guardrails
+- Profil peramban, biner portabel, dan seluruh token sesi akun TIDAK BOLEH dilacak oleh Git (dilindungi ketat oleh `.gitignore`).
+- Zero cursor hijacking: dilarang menggunakan fungsi Windows API yang menggerakkan kursor mouse atau keyboard fisik pengguna.
+- Kedaulatan Git lokal: commit dilakukan secara lokal dengan pesan Conventional Commit deskriptif.
