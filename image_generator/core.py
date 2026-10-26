@@ -25,6 +25,7 @@ from image_generator.constants import (
     DEFAULT_COUNT,
     DEFAULT_MODEL,
     FLOW_HOME_URL,
+    RATIO_ICON_MAP,
     console,
     normalize_aspect_ratio,
     normalize_count,

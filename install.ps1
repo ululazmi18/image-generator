@@ -76,7 +76,8 @@ Write-Host "      ✓ Berada di direktori: $(Get-Location)" -ForegroundColor Gre
 # 5. PASANG DEPENDENSI PIP
 Write-Host "[5/6] Memasang dependensi Python (rich, pillow, dll)..." -ForegroundColor Yellow
 & $pythonCmd -m pip install -r requirements.txt --quiet
-Write-Host "      ✓ Pustaka dependensi Python siap." -ForegroundColor Green
+& $pythonCmd -m pip install -e . --no-deps --quiet
+Write-Host "      ✓ Pustaka dependensi Python & perintah CLI image-generator siap." -ForegroundColor Green
 
 # 6. SIAPKAN PERAMBAN FIREFOX PORTABLE STEALTH
 Write-Host "[6/6] Memeriksa biner peramban portabel & profil stealth..." -ForegroundColor Yellow

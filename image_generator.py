@@ -36,10 +36,12 @@ from image_generator.constants import (
     DEFAULT_MODEL,
     FLOW_HOME_URL,
     MODEL_ALIASES,
+    RATIO_ICON_MAP,
     normalize_aspect_ratio,
     normalize_count,
     normalize_model,
 )
+
 from image_generator.core import ImageGenerator
 from image_generator.exceptions import (
     BrowserNotFoundError,

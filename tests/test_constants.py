@@ -54,6 +54,14 @@ class TestConstantsAndNormalizers(unittest.TestCase):
         self.assertEqual(normalize_count(None), f"x{DEFAULT_COUNT}")
         self.assertEqual(normalize_count(99), f"x{DEFAULT_COUNT}")
 
+    def test_ratio_icon_map(self) -> None:
+        from image_generator.constants import RATIO_ICON_MAP
+        self.assertEqual(RATIO_ICON_MAP["16:9"], "crop_16_9")
+        self.assertEqual(RATIO_ICON_MAP["1:1"], "crop_square")
+        self.assertEqual(RATIO_ICON_MAP["9:16"], "crop_9_16")
+        self.assertEqual(RATIO_ICON_MAP["4:3"], "crop_landscape")
+        self.assertEqual(RATIO_ICON_MAP["3:4"], "crop_portrait")
+
 
 if __name__ == "__main__":
     unittest.main()
