@@ -665,6 +665,8 @@ class ImageGenerator:
         model: str = DEFAULT_MODEL,
         aspect_ratio: str = DEFAULT_ASPECT_RATIO,
         count: int | str = DEFAULT_COUNT,
+        email: str | None = None,
+        password: str | None = None,
         debug: bool = False,
     ):
         """Menginisialisasi konfigurasi pengontrol ImageGenerator.
@@ -675,6 +677,8 @@ class ImageGenerator:
             model (str): Nama rangkaian model AI (default: 'Nano Banana Pro').
             aspect_ratio (str): Aspek rasio gambar ('16:9', '4:3', '1:1', '3:4', '9:16').
             count (int | str): Kuantitas variasi gambar per generasi (1, 2, 3, 4 atau 'x1', 'x2', dst).
+            email (str | None): Alamat email Google opsional untuk login otomatis.
+            password (str | None): Kata sandi Google opsional untuk login otomatis.
             debug (bool): Mengaktifkan mode debug dengan dokumentasi tangkapan layar visual (default: False).
         """
         if workspace_dir is None:
@@ -685,6 +689,8 @@ class ImageGenerator:
         self.model = normalize_model(model)
         self.aspect_ratio = normalize_aspect_ratio(aspect_ratio)
         self.count_str = normalize_count(count)
+        self.email = email
+        self.password = password
 
         # Deteksi profil peramban (lokal, environment variable, atau dari repo browser tetangga)
         custom_profile = os.environ.get("BROWSER_PROFILE")
@@ -950,58 +956,144 @@ class ImageGenerator:
         self.driver.switch_to_window(target_handle)
         return target_handle
 
-    def handle_login_if_needed(self) -> bool:
-        """Memeriksa dan menangani alur masuk (login) akun Google jika belum terhubung.
+    def prompt_and_login_if_needed(self, email: str | None = None, password: str | None = None) -> bool:
+        """Memeriksa status login Google Flow dan membantu proses login secara langsung & otomatis.
 
-        Mengeklik tombol 'Buat dengan Google Flow' pada halaman landing /about, atau memilih
-        akun Google yang sudah tersimpan di profil pada halaman Google Account Chooser.
+        Jika sesi akun Google belum terhubung atau telah kedaluwarsa:
+        1. Menampilkan panel informasi yang jelas dan ramah kepada pengguna.
+        2. Menawarkan bantuan langsung di terminal untuk menghubungkan akun Google Flow (100% Full CLI).
+        3. Menjalankan modul otomasi login headless mandiri (via Chromium Playwright lokal).
+        4. Menyimpan token autentikasi (cookies.sqlite) langsung ke profil peramban.
+        5. Meluncurkan ulang peramban dan melanjutkan alur generasi gambar secara mulus.
+
+        Args:
+            email (str | None): Alamat email Google Flow opsional.
+            password (str | None): Kata sandi Google Flow opsional.
 
         Returns:
-            bool: True jika berhasil masuk atau sudah dalam kondisi login, False jika terjadi galat.
+            bool: True jika akun berhasil terhubung dan siap digunakan.
+
+        Raises:
+            RuntimeError: Jika pengguna menolak bantuan login atau autentikasi gagal.
         """
-        login_script = """
-        const url = window.location.href.toLowerCase();
-        // 1. Cek apakah sudah di dashboard / kanvas project
-        const hasDashboard = !!document.querySelector('aisandbox-root, flow-project-shell, flow-prompt-box, .project-card');
-        if (hasDashboard && !url.includes('/about')) {
-            return { action: 'logged_in', url: url };
-        }
+        curr_url = ""
+        try:
+            curr_url = (self.driver.execute_script("return window.location.href;") or "").lower()
+        except Exception:
+            pass
 
-        // 2. Cek halaman landing /about atau tombol masuk
-        const actionBtn = Array.from(document.querySelectorAll('a, button')).find(el => {
-            const t = (el.textContent || '').trim().toLowerCase();
-            return t.includes('buat dengan google flow') || t === 'sign in' || t === 'masuk' || t === 'log in';
-        });
-        if (actionBtn) {
-            actionBtn.click();
-            return { action: 'clicked_signin', url: url };
-        }
-
-        // 3. Cek Google Account Chooser
-        if (url.includes('accounts.google.com')) {
-            const acc = document.querySelector('div[data-identifier], li[data-identifier], [data-email]');
-            if (acc) {
-                acc.click();
-                return { action: 'selected_account', url: url };
-            }
-        }
-
-        return { action: 'waiting', url: url };
-        """
-        for _ in range(15):
+        # Deteksi kondisi belum login
+        is_unauth = False
+        if "/about" in curr_url or "accounts.google.com" in curr_url or "flow.google.com/about" in curr_url:
+            is_unauth = True
+        elif "flow.google.com" in curr_url and not ("/project/" in curr_url):
             try:
-                res = self.driver.execute_script(login_script)
-                if isinstance(res, dict):
-                    action = res.get("action")
-                    if action in ("clicked_signin", "selected_account"):
-                        time.sleep(3.5)
-                        continue
-                    if action == "logged_in":
-                        return True
+                has_signin_or_about = self.driver.execute_script("""
+                const text = (document.body ? document.body.innerText : '') || '';
+                const hasBtn = !!Array.from(document.querySelectorAll('button, a')).find(el => {
+                    const t = (el.textContent || '').trim().toLowerCase();
+                    return t.includes('create with google flow') || t.includes('sign in') || t.includes('masuk');
+                });
+                return hasBtn || text.includes('Create with Google Flow') || text.includes('Unlock your best creative work');
+                """)
+                if has_signin_or_about:
+                    is_unauth = True
             except Exception:
                 pass
-            time.sleep(1.0)
-        return False
+
+        if not is_unauth:
+            return True
+
+        # Tampilkan panel informasi bantuan autentikasi
+        console.print(
+            Panel(
+                "[bold yellow]Akun Google belum terhubung atau sesi login Google Flow telah berakhir.[/bold yellow]\n\n"
+                "Peramban mendeteksi halaman publik ([cyan]flow.google.com/about[/cyan]).\n"
+                "Otomasi siap membantu menghubungkan akun Google Anda sekarang secara langsung & otomatis (100% Full CLI).\n"
+                "[dim]• Biner peramban otomasi berjalan senyap di latar belakang (tanpa jendela GUI).\n"
+                "• Token sesi disimpan aman dan terisolasi di [cyan]browser_profile/cookies.sqlite[/cyan] lokal proyek.[/dim]",
+                title="[gold]Bantuan Autentikasi Google Flow[/gold]",
+                box=box.ROUNDED,
+            )
+        )
+
+        email_to_use = email or getattr(self, "email", None) or os.environ.get("GOOGLE_EMAIL")
+        pwd_to_use = password or getattr(self, "password", None) or os.environ.get("GOOGLE_PASSWORD")
+
+        if not email_to_use:
+            try:
+                connect_ask = Prompt.ask(
+                    "[cyan]Apakah Anda ingin menghubungkan akun Google Flow sekarang? [Y/n][/cyan]",
+                    default="y",
+                )
+            except (EOFError, KeyboardInterrupt):
+                connect_ask = "n"
+
+            if connect_ask.strip().lower() in ("n", "no", "tidak"):
+                raise RuntimeError(
+                    "Akun Google belum terhubung. Diperlukan autentikasi akun Google Flow aktif "
+                    "untuk dapat mengakses kanvas dan menghasilkan gambar."
+                )
+
+        # Temukan berkas login.py dari folder firefox-stealth-automation
+        login_script_candidates = [
+            self.workspace_dir / "firefox-stealth-automation" / "login.py",
+            self.workspace_dir.parent / "firefox-stealth-automation" / "login.py",
+            Path(r"D:\New folder\image-generator\firefox-stealth-automation\login.py"),
+            Path(r"D:\New folder\firefox-stealth-automation\login.py"),
+        ]
+        login_script = next((p for p in login_script_candidates if p.exists()), None)
+
+        if not login_script:
+            raise RuntimeError(
+                "Modul login 'firefox-stealth-automation/login.py' tidak ditemukan. "
+                "Silakan pastikan repositori/folder firefox-stealth-automation tersedia di direktori proyek."
+            )
+
+        # Tutup Firefox sementara agar cookies.sqlite tidak terkunci oleh proses Gecko
+        console.print("[info]ℹ Menyiapkan peramban otomasi untuk autentikasi langsung...[/info]")
+        self.close()
+
+        login_dir = login_script.parent
+        if str(login_dir) not in sys.path:
+            sys.path.insert(0, str(login_dir))
+
+        try:
+            from login import automated_google_login
+            success = automated_google_login(
+                email=email_to_use,
+                password=pwd_to_use,
+                profile_dir=self.profile_dir,
+            )
+        except Exception as login_err:
+            console.print(f"[error]✗ Terjadi kegagalan pada modul login otomatis:[/error] {login_err}")
+            success = False
+
+        if not success:
+            raise RuntimeError(
+                "Autentikasi akun Google Flow belum berhasil diselesaikan. "
+                "Silakan periksa kredensial Anda dan ulangi perintah untuk mencoba kembali."
+            )
+
+        # Sinkronkan file cookies ke profil firefox-stealth-automation jika berbeda
+        neighbor_profile = login_dir / "browser_profile"
+        if neighbor_profile.resolve() != self.profile_dir.resolve() and neighbor_profile.exists():
+            try:
+                src_db = self.profile_dir / "cookies.sqlite"
+                if src_db.exists():
+                    shutil.copy2(src_db, neighbor_profile / "cookies.sqlite")
+            except Exception:
+                pass
+
+        console.print("[success]✓ Autentikasi berhasil! Meluncurkan peramban kembali dan melanjutkan generasi gambar...[/success]")
+        time.sleep(1.5)
+
+        # Luncurkan kembali Firefox dengan sesi yang kini sudah aktif
+        self.ensure_browser()
+        self.connect()
+        self.driver.navigate(FLOW_HOME_URL)
+        time.sleep(3.5)
+        return True
 
     def open_or_create_project(self, target_project_name: str = "images generator") -> bool:
         """Mencari proyek dengan nama target di dasbor, atau membuka proyek yang ada / membuat baru.
@@ -1518,32 +1610,8 @@ class ImageGenerator:
         else:
             self.driver.switch_to_window(flow_handle)
 
-        # 1. Periksa apakah sesi akun Google belum terhubung (berada di /about atau halaman login)
-        curr_url = ""
-        try:
-            curr_url = (self.driver.execute_script("return window.location.href;") or "").lower()
-        except Exception:
-            pass
-
-        if "/about" in curr_url or "accounts.google.com" in curr_url:
-            console.print(
-                Panel(
-                    "[bold yellow]Akun Google belum terhubung atau sesi login telah berakhir.[/bold yellow]\n\n"
-                    "Peramban dialihkan ke halaman publik Google Flow ([cyan]flow.google.com/about[/cyan])\n"
-                    "karena profil peramban belum memiliki sesi login Google yang aktif.\n\n"
-                    "[bold white]Solusi / Langkah Perbaikan:[/bold white]\n"
-                    "1. Buka folder [cyan]firefox-stealth-automation[/cyan]\n"
-                    "2. Jalankan perintah: [bold green]python login.py[/bold green]\n"
-                    "3. Masukkan email & sandi Google Flow Anda di terminal (100% aman & terisolasi di peramban lokal)\n"
-                    "4. Setelah sesi terverifikasi sukses, jalankan kembali [bold cyan]run.bat[/bold cyan] atau [bold cyan]image_generator.py[/bold cyan].",
-                    title="[gold]Sesi Google Flow Belum Aktif[/gold]",
-                    box=box.ROUNDED,
-                )
-            )
-            raise RuntimeError(
-                "Sesi akun Google belum terhubung atau telah berakhir di profil peramban. "
-                "Silakan jalankan 'python login.py' di folder firefox-stealth-automation terlebih dahulu."
-            )
+        # 1. Periksa apakah sesi akun Google belum terhubung dan bantu login secara langsung & otomatis jika diperlukan
+        self.prompt_and_login_if_needed()
 
         # 2. Tutup dialog modal onboarding jika muncul di beranda
         self.dismiss_onboarding_dialog()
@@ -1559,17 +1627,12 @@ class ImageGenerator:
                 except Exception:
                     pass
                 if "/about" in retry_url or "accounts.google.com" in retry_url:
-                    console.print(
-                        Panel(
-                            "[bold yellow]Akun Google belum terhubung atau sesi login telah berakhir.[/bold yellow]\n\n"
-                            "Google Flow mengalihkan peramban ke halaman login publik.\n"
-                            "Silakan jalankan [bold green]python login.py[/bold green] di folder [cyan]firefox-stealth-automation[/cyan] untuk menghubungkan akun Google Anda.",
-                            title="[gold]Autentikasi Diperlukan[/gold]",
-                            box=box.ROUNDED,
-                        )
-                    )
-                    raise RuntimeError("Sesi akun Google belum terhubung. Silakan jalankan 'python login.py' di firefox-stealth-automation.")
-                raise RuntimeError("Gagal membuka atau membuat kanvas proyek Google Flow.")
+                    self.prompt_and_login_if_needed()
+                    if not self.open_or_create_project(target_project_name="images generator"):
+                        if not self.open_or_create_project(target_project_name=""):
+                            raise RuntimeError("Gagal membuka atau membuat kanvas proyek Google Flow setelah login.")
+                else:
+                    raise RuntimeError("Gagal membuka atau membuat kanvas proyek Google Flow. Pastikan jaringan internet aktif.")
 
         # 4. Tutup dialog modal onboarding jika muncul di kanvas proyek
         self.dismiss_onboarding_dialog()
@@ -2167,6 +2230,8 @@ def generate_image(
     model: str = DEFAULT_MODEL,
     aspect_ratio: str = DEFAULT_ASPECT_RATIO,
     count: int | str = DEFAULT_COUNT,
+    email: str | None = None,
+    password: str | None = None,
     timeout: int = 180,
     max_retries: int | None = None,
     retry_delay: float = 12.0,
@@ -2204,6 +2269,8 @@ def generate_image(
         aspect_ratio (str): Aspek rasio gambar ('16:9', '4:3', '1:1', '3:4', '9:16' atau alias 'square', 'vertical').
                             Default: '16:9'.
         count (int | str): Kuantitas variasi gambar per generasi (1, 2, 3, 4 atau 'x1', 'x2', dst). Default: 1.
+        email (str | None): Alamat email Google opsional untuk login otomatis mandiri.
+        password (str | None): Kata sandi Google opsional untuk login otomatis mandiri.
         timeout (int): Batas waktu maksimal proses pembuatan gambar per percobaan dalam detik (default: 180).
         max_retries (int | None): Batas maksimal percobaan ulang (default: None, mengulang tanpa batas).
         retry_delay (float): Jeda waktu dalam detik sebelum mengulang percobaan berikutnya (default: 12.0).
@@ -2235,6 +2302,8 @@ def generate_image(
         model=model,
         aspect_ratio=aspect_ratio,
         count=count,
+        email=email,
+        password=password,
         timeout=timeout,
         max_retries=max_retries,
         retry_delay=retry_delay,
@@ -2253,6 +2322,8 @@ def generate(
     model: str = DEFAULT_MODEL,
     aspect_ratio: str = DEFAULT_ASPECT_RATIO,
     count: int | str = DEFAULT_COUNT,
+    email: str | None = None,
+    password: str | None = None,
     timeout: int = 180,
     max_retries: int | None = None,
     retry_delay: float = 12.0,
@@ -2268,6 +2339,8 @@ def generate(
         model (str): Model AI Google Flow yang dipilih (default: 'Nano Banana Pro').
         aspect_ratio (str): Aspek rasio kanvas gambar (default: '16:9').
         count (int | str): Kuantitas variasi gambar per generasi (default: 1).
+        email (str | None): Alamat email Google opsional untuk login otomatis mandiri.
+        password (str | None): Kata sandi Google opsional untuk login otomatis mandiri.
         timeout (int): Batas waktu maksimal per percobaan dalam detik (default: 180).
         max_retries (int | None): Batas percobaan maksimal (default: None, tanpa batas).
         retry_delay (float): Waktu tunggu antar-percobaan dalam detik (default: 12.0).
@@ -2283,6 +2356,8 @@ def generate(
         model=model,
         aspect_ratio=aspect_ratio,
         count=count,
+        email=email,
+        password=password,
         debug=debug,
     )
 
@@ -2477,6 +2552,18 @@ def show_help() -> None:
         "Batas waktu maksimal render per percobaan dalam detik.",
     )
     opts_table.add_row(
+        "--email",
+        "-e",
+        "String [dim](Opsional)[/dim]",
+        "Alamat email Google Flow untuk login otomatis mandiri.",
+    )
+    opts_table.add_row(
+        "--password",
+        "--pass, -pwd",
+        "String [dim](Opsional)[/dim]",
+        "Kata sandi Google Flow untuk login otomatis mandiri.",
+    )
+    opts_table.add_row(
         "--debug",
         "-",
         "Flag [dim](Nonaktif)[/dim]",
@@ -2590,8 +2677,8 @@ def show_help() -> None:
 # ==============================================================================
 # CLI PARSER & INTERFACE RUNNER
 # ==============================================================================
-def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool]:
-    """Mengekstrak parameter baris perintah (CLI) untuk prompt, setelan model, rasio, dan kuantitas.
+def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool, str | None, str | None]:
+    """Mengekstrak parameter baris perintah (CLI) untuk prompt, setelan model, rasio, kuantitas, dan kredensial.
 
     Mendukung opsi:
     - `--prompt` / `-p`: Teks deskripsi prompt.
@@ -2600,11 +2687,13 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool]:
     - `--count` / `-c` / `--variations` / `-v`: Kuantitas variasi (1, 2, 3, 4 atau 'x1', 'x2', dst).
     - `--output` / `-o` / `--dest` / `-d`: Folder atau nama berkas tujuan pemindahan.
     - `--timeout` / `-t`: Batas waktu maksimal per percobaan dalam detik (default: 180).
+    - `--email` / `-e`: Alamat email Google Flow opsional untuk login otomatis mandiri.
+    - `--password` / `--pass` / `-pwd`: Kata sandi Google Flow opsional untuk login otomatis mandiri.
     - `--debug`: Mengaktifkan mode debug visual dengan dokumentasi tangkapan layar (.png).
     - `--help` / `-h` / `help`: Menampilkan panduan bantuan lengkap dan keluar.
 
     Returns:
-        tuple: (prompt, output_dest, model, aspect_ratio, count_str, timeout, debug_enabled)
+        tuple: (prompt, output_dest, model, aspect_ratio, count_str, timeout, debug_enabled, email, password)
     """
     args = sys.argv[1:]
 
@@ -2620,6 +2709,8 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool]:
     model_flags = ["--model", "-m"]
     ratio_flags = ["--aspect-ratio", "--ar", "-a", "--ratio"]
     count_flags = ["--count", "-c", "--variations", "-v", "--var"]
+    email_flags = ["--email", "-e"]
+    password_flags = ["--password", "--pass", "-pwd"]
     headless_flags = ["--headless"]
     debug_flags = ["--debug"]
 
@@ -2629,6 +2720,8 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool]:
     model_val = DEFAULT_MODEL
     ratio_val = DEFAULT_ASPECT_RATIO
     count_val = DEFAULT_COUNT
+    email_val = None
+    password_val = None
     prompt_tokens = []
 
     # Konsumsi flag --headless jika masih dioper oleh pengguna agar kompatibel
@@ -2654,6 +2747,12 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool]:
         elif arg in count_flags and i + 1 < len(args):
             count_val = normalize_count(args[i + 1])
             i += 2
+        elif arg in email_flags and i + 1 < len(args):
+            email_val = args[i + 1]
+            i += 2
+        elif arg in password_flags and i + 1 < len(args):
+            password_val = args[i + 1]
+            i += 2
         elif arg in timeout_flags and i + 1 < len(args):
             try:
                 timeout_val = int(args[i + 1])
@@ -2677,6 +2776,12 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool]:
                 elif args[i] in count_flags:
                     count_val = normalize_count(args[i + 1]) if i + 1 < len(args) else count_val
                     i += 2
+                elif args[i] in email_flags:
+                    email_val = args[i + 1] if i + 1 < len(args) else None
+                    i += 2
+                elif args[i] in password_flags:
+                    password_val = args[i + 1] if i + 1 < len(args) else None
+                    i += 2
                 elif args[i] in timeout_flags:
                     try:
                         timeout_val = int(args[i + 1])
@@ -2697,7 +2802,7 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool]:
             i += 1
 
     prompt_str = " ".join(prompt_tokens).strip()
-    return prompt_str, output_val, model_val, ratio_val, normalize_count(count_val), timeout_val, debug_val
+    return prompt_str, output_val, model_val, ratio_val, normalize_count(count_val), timeout_val, debug_val, email_val, password_val
 
 
 def main() -> int:
@@ -2709,7 +2814,7 @@ def main() -> int:
     )
     console.print(Panel(banner, box=box.ROUNDED, style="color(240)"))
 
-    prompt, output_dest, model, aspect_ratio, count_str, timeout, debug = parse_cli_args()
+    prompt, output_dest, model, aspect_ratio, count_str, timeout, debug, email_arg, pwd_arg = parse_cli_args()
 
     # Mode interaktif jika prompt belum diisi via CLI
     if not prompt:
@@ -2781,6 +2886,8 @@ def main() -> int:
                 model=model,
                 aspect_ratio=aspect_ratio,
                 count=count_str,
+                email=email_arg,
+                password=pwd_arg,
                 debug=debug,
             )
             generator.ensure_browser()
