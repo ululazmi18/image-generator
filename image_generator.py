@@ -1134,12 +1134,14 @@ class ImageGenerator:
         """
         # 1. Cek apakah saat ini sudah berada di dalam kanvas proyek yang valid
         check_inside_script = """
-        const url = window.location.href.toLowerCase();
-        const hasShell = !!document.querySelector('flow-project-shell, flow-prompt-box');
+        const url = (window.location.href || '').toLowerCase();
+        const bodyText = (document.body ? document.body.innerText : '').toLowerCase();
+        const is404 = url.includes('/404') || url.includes('reason=project') || bodyText.includes('project tidak ditemukan') || bodyText.includes('halaman tidak ditemukan');
         const hasEditor = !!document.querySelector('.ProseMirror[contenteditable="true"]');
-        const isNot404 = !url.includes('/404') && !url.includes('reason=project');
+        const hasPromptBox = !!document.querySelector('flow-prompt-box');
+        const isCanvasReady = url.includes('/project/') && !is404 && (hasEditor || hasPromptBox);
         return {
-            inside: (hasShell || hasEditor) && url.includes('/project/') && isNot404,
+            inside: isCanvasReady,
             url: window.location.href
         };
         """
@@ -1152,16 +1154,9 @@ class ImageGenerator:
             pass
 
         # 2. Navigasikan ke beranda Google Flow jika belum di kanvas valid atau sedang di 404
-        curr_url = ""
-        try:
-            curr_url = self.driver.execute_script("return window.location.href;") or ""
-        except Exception:
-            pass
-
-        if "/404" in curr_url or "reason=project" in curr_url or not ("flow.google.com" in curr_url) or "/project/" in curr_url:
-            console.print(f"[info]ℹ[/info] Memeriksa proyek [cyan]{target_project_name}[/cyan] di Google Flow...")
-            self.driver.navigate(FLOW_HOME_URL)
-            time.sleep(3.5)
+        console.print(f"[info]ℹ[/info] Memeriksa proyek [cyan]{target_project_name}[/cyan] di Google Flow...")
+        self.driver.navigate(FLOW_HOME_URL)
+        time.sleep(3.5)
 
         # 3. Tutup dialog modal onboarding jika muncul di beranda
         self.dismiss_onboarding_dialog()
@@ -1171,7 +1166,10 @@ class ImageGenerator:
         const target = (arguments[0] || '').toLowerCase().replace(/[\\s_-]+/g, ' ');
 
         // 4a. Cari proyek yang namanya cocok dengan target ('images generator' / 'image generator')
-        const links = Array.from(document.querySelectorAll('a[href*="/project/"]'));
+        const links = Array.from(document.querySelectorAll('a[href*="/project/"]')).filter(a => {
+            const h = (a.href || '').toLowerCase();
+            return !h.includes('/404') && !h.includes('reason=project');
+        });
         if (target) {
             const matchedLink = links.find(a => {
                 const txt = (a.textContent || '').toLowerCase().replace(/[\\s_-]+/g, ' ');
@@ -1216,13 +1214,14 @@ class ImageGenerator:
                 pass
             time.sleep(1.0)
 
-        # 5. Tunggu kanvas proyek termuat penuh
+        # 5. Tunggu kanvas proyek termuat penuh dengan editor ProseMirror aktif
         wait_canvas_script = """
-        const url = window.location.href.toLowerCase();
-        const hasShell = !!document.querySelector('flow-project-shell, flow-prompt-box');
+        const url = (window.location.href || '').toLowerCase();
+        const bodyText = (document.body ? document.body.innerText : '').toLowerCase();
+        const is404 = url.includes('/404') || url.includes('reason=project') || bodyText.includes('project tidak ditemukan') || bodyText.includes('halaman tidak ditemukan');
         const hasEditor = !!document.querySelector('.ProseMirror[contenteditable="true"]');
-        const isNot404 = !url.includes('/404') && !url.includes('reason=project');
-        return (hasShell || hasEditor) && url.includes('/project/') && isNot404;
+        const hasPromptBox = !!document.querySelector('flow-prompt-box');
+        return url.includes('/project/') && !is404 && (hasEditor || hasPromptBox);
         """
         for _ in range(30):
             try:
@@ -1897,7 +1896,7 @@ class ImageGenerator:
         return true;
         """
         cleared = False
-        for _ in range(20):
+        for _ in range(12):
             try:
                 cleared = self.driver.execute_script(clear_script)
                 if cleared:
@@ -1905,6 +1904,20 @@ class ImageGenerator:
             except Exception:
                 pass
             time.sleep(0.5)
+
+        if not cleared:
+            # Fallback pemulihan otomatis: coba buka kembali proyek yang valid
+            console.print("[warning]⚠ Editor ProseMirror belum aktif pada kanvas. Melakukan pemulihan proyek kanvas...[/warning]")
+            if self.open_or_create_project():
+                time.sleep(1.5)
+                for _ in range(15):
+                    try:
+                        cleared = self.driver.execute_script(clear_script)
+                        if cleared:
+                            break
+                    except Exception:
+                        pass
+                    time.sleep(0.5)
 
         if not cleared:
             raise RuntimeError("Elemen editor ProseMirror tidak ditemukan pada kanvas.")
@@ -3123,7 +3136,7 @@ def main() -> int:
                     )
                     return 1
 
-                except (GenerationFailedError, TimeoutError) as attempt_err:
+                except (GenerationFailedError, TimeoutError, RuntimeError) as attempt_err:
                     generator.capture_debug_screenshot(
                         f"failure_state_att_{attempt}",
                         f"Visual kegagalan (Percobaan ke-{attempt}): {attempt_err}",
