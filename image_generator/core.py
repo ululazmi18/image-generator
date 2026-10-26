@@ -89,9 +89,14 @@ class ImageGenerator:
             debug (bool): Mengaktifkan mode debug dengan dokumentasi tangkapan layar visual (default: False).
         """
         if workspace_dir is None:
-            self.workspace_dir = Path(__file__).resolve().parent
+            pkg_dir = Path(__file__).resolve().parent
+            if (pkg_dir.parent / "pyproject.toml").exists() or (pkg_dir.parent / "requirements.txt").exists() or (pkg_dir.parent / "run.bat").exists():
+                self.workspace_dir = pkg_dir.parent
+            else:
+                self.workspace_dir = Path.cwd().resolve()
         else:
             self.workspace_dir = Path(workspace_dir).resolve()
+
 
         self.model = normalize_model(model)
         self.aspect_ratio = normalize_aspect_ratio(aspect_ratio)
