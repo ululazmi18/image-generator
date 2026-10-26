@@ -734,6 +734,10 @@ class ImageGenerator:
         if self.debug:
             self.debug_dir.mkdir(parents=True, exist_ok=True)
 
+        # Brankas Sesi Multi-Akun Ringan (Zero-Bloat Single Profile Vault)
+        self.vault_dir = self.profile_dir / "accounts"
+        self.vault_dir.mkdir(parents=True, exist_ok=True)
+
     def capture_debug_screenshot(self, step_name: str, description: str = "") -> Path | None:
         """Mengambil tangkapan layar viewport peramban untuk dokumentasi visual saat mode debug aktif.
 
@@ -958,10 +962,15 @@ class ImageGenerator:
         self.driver.switch_to_window(target_handle)
         return target_handle
 
-    def prompt_and_login_if_needed(self, email: str | None = None, password: str | None = None) -> bool:
+    def prompt_and_login_if_needed(
+        self,
+        email: str | None = None,
+        password: str | None = None,
+        force: bool = False,
+    ) -> bool:
         """Memeriksa status login Google Flow dan membantu proses login secara langsung & otomatis.
 
-        Jika sesi akun Google belum terhubung atau telah kedaluwarsa:
+        Jika sesi akun Google belum terhubung atau telah kedaluwarsa (atau jika force=True):
         1. Menampilkan panel informasi yang jelas dan ramah kepada pengguna.
         2. Menawarkan bantuan langsung di terminal untuk menghubungkan akun Google Flow (100% Full CLI).
         3. Menjalankan modul otomasi login headless mandiri (via Chromium Playwright lokal).
@@ -971,6 +980,7 @@ class ImageGenerator:
         Args:
             email (str | None): Alamat email Google Flow opsional.
             password (str | None): Kata sandi Google Flow opsional.
+            force (bool): Paksa alur login akun baru meskipun peramban sedang memiliki sesi aktif.
 
         Returns:
             bool: True jika akun berhasil terhubung dan siap digunakan.
@@ -986,7 +996,9 @@ class ImageGenerator:
 
         # Deteksi kondisi belum login
         is_unauth = False
-        if "/about" in curr_url or "accounts.google.com" in curr_url or "flow.google.com/about" in curr_url:
+        if force:
+            is_unauth = True
+        elif "/about" in curr_url or "accounts.google.com" in curr_url or "flow.google.com/about" in curr_url:
             is_unauth = True
         elif "flow.google.com" in curr_url and not ("/project/" in curr_url):
             try:
@@ -1170,6 +1182,170 @@ class ImageGenerator:
             pass
 
         return getattr(self, "email", None) or os.environ.get("GOOGLE_EMAIL")
+
+    def _sanitize_email(self, email: str) -> str:
+        """Membersihkan format alamat email agar aman digunakan sebagai nama direktori."""
+        return re.sub(r"[^\w\-_]", "_", email.strip().lower())
+
+    def save_account_to_vault(self, email: str | None = None) -> bool:
+        """Mencadangkan sesi akun (cookies.sqlite) saat ini ke dalam brankas akun lokal (Account Vault).
+
+        Args:
+            email (str | None): Alamat email akun. Jika None, akan dideteksi dari kanvas aktif.
+
+        Returns:
+            bool: True jika berhasil dicadangkan ke brankas akun lokal.
+        """
+        target_email = email or self.get_current_user_email()
+        if not target_email or "@" not in target_email:
+            return False
+
+        src_cookie = self.profile_dir / "cookies.sqlite"
+        if not src_cookie.exists():
+            return False
+
+        account_dir = self.vault_dir / self._sanitize_email(target_email)
+        account_dir.mkdir(parents=True, exist_ok=True)
+        dest_cookie = account_dir / "cookies.sqlite"
+
+        try:
+            shutil.copy2(src_cookie, dest_cookie)
+            meta_file = account_dir / "meta.json"
+            meta_data = {
+                "email": target_email,
+                "saved_at": time.time(),
+                "saved_at_human": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            meta_file.write_text(json.dumps(meta_data, indent=2), encoding="utf-8")
+            return True
+        except Exception:
+            return False
+
+    def load_account_from_vault(self, email: str) -> bool:
+        """Memuat sesi akun (cookies.sqlite) dari brankas akun lokal ke profil peramban aktif.
+
+        Args:
+            email (str): Alamat email akun yang ingin dimuat dari brankas.
+
+        Returns:
+            bool: True jika sesi akun berhasil dimuat dari brankas.
+        """
+        if not email or "@" not in email:
+            return False
+
+        account_dir = self.vault_dir / self._sanitize_email(email)
+        src_cookie = account_dir / "cookies.sqlite"
+        if not src_cookie.exists():
+            return False
+
+        dest_cookie = self.profile_dir / "cookies.sqlite"
+        try:
+            # Tutup peramban sementara agar file cookies.sqlite tidak terkunci oleh proses Gecko
+            was_running = self.proc is not None or self.driver.is_port_open(0.2)
+            if was_running:
+                self.close()
+
+            shutil.copy2(src_cookie, dest_cookie)
+            self.email = email
+            return True
+        except Exception:
+            return False
+
+    def list_vault_accounts(self) -> list[dict]:
+        """Mendaftar seluruh sesi akun Google yang tersimpan di dalam brankas akun lokal.
+
+        Returns:
+            list[dict]: Daftar akun tersimpan beserta metadata waktu penyimpanan.
+        """
+        accounts = []
+        if not self.vault_dir.exists():
+            return accounts
+
+        for ad in self.vault_dir.iterdir():
+            if ad.is_dir() and (ad / "cookies.sqlite").exists():
+                meta_file = ad / "meta.json"
+                email_name = ad.name.replace("_", ".")
+                saved_time = ""
+                if meta_file.exists():
+                    try:
+                        data = json.loads(meta_file.read_text(encoding="utf-8"))
+                        email_name = data.get("email", email_name)
+                        saved_time = data.get("saved_at_human", "")
+                    except Exception:
+                        pass
+                accounts.append({
+                    "email": email_name,
+                    "dir": ad,
+                    "saved_at": saved_time,
+                })
+        return accounts
+
+    def switch_account_if_needed(self, requested_email: str | None = None) -> bool:
+        """Memeriksa dan mengeksekusi pergantian akun Google Flow secara cerdas (Account Vault).
+
+        Jika requested_email ditentukan dan berbeda dari akun aktif saat ini:
+        1. Mencadangkan sesi aktif saat ini ke brankas akun (~512 KB, zero disk bloat).
+        2. Jika requested_email sudah ada di brankas -> hot-swap cookies.sqlite secara instan (0.1s).
+        3. Jika requested_email belum ada di brankas -> luncurkan login otomatis dan simpan sesi baru.
+
+        Args:
+            requested_email (str | None): Alamat email target (misal dari flag --email).
+
+        Returns:
+            bool: True jika akun siap digunakan.
+        """
+        target = requested_email or getattr(self, "email", None)
+        if not target or "@" not in str(target):
+            # Jika tidak ada target spesifik, cadangkan sesi aktif saat ini jika ada
+            curr = self.get_current_user_email()
+            if curr:
+                self.save_account_to_vault(curr)
+            return True
+
+        target_clean = str(target).strip().lower()
+        curr_active = (self.get_current_user_email() or "").strip().lower()
+
+        # Selalu cadangkan sesi akun aktif saat ini ke brankas
+        if curr_active:
+            self.save_account_to_vault(curr_active)
+
+        # Jika akun yang diminta sama dengan akun aktif, tidak perlu tindakan
+        if curr_active and curr_active == target_clean:
+            return True
+
+        console.print(
+            Panel(
+                f"[bold cyan]PERMINTAAN PERGANTIAN AKUN GOOGLE FLOW[/bold cyan]\n\n"
+                f"• Akun Aktif Saat Ini : [yellow]{curr_active or 'Belum terdeteksi'}[/yellow]\n"
+                f"• Akun Target Diminta : [bold green]{target}[/bold green]",
+                box=box.ROUNDED,
+                title="[cyan]Account Vault Switcher[/cyan]",
+            )
+        )
+
+        # 1. Periksa apakah akun target sudah ada di brankas lokal
+        if self.load_account_from_vault(target):
+            console.print(
+                f"[success]✓ Sesi akun [cyan]{target}[/cyan] ditemukan di brankas lokal! Mengaktifkan sesi secara instan...[/success]"
+            )
+            time.sleep(1.0)
+            self.ensure_browser()
+            self.connect()
+            self.driver.navigate(FLOW_HOME_URL)
+            time.sleep(3.5)
+            return True
+
+        # 2. Jika belum ada di brankas, jalankan autentikasi otomatis untuk akun target baru
+        console.print(
+            f"[info]ℹ Akun [cyan]{target}[/cyan] belum ada di brankas. Menyiapkan autentikasi langsung...[/info]"
+        )
+        self.prompt_and_login_if_needed(
+            email=target,
+            password=getattr(self, "password", None),
+            force=True,
+        )
+        self.save_account_to_vault(target)
+        return True
 
     def open_or_create_project(self, target_project_name: str = "images generator") -> bool:
         """Mencari proyek dengan nama target di dasbor, atau membuka proyek yang ada / membuat baru.
@@ -1685,8 +1861,11 @@ class ImageGenerator:
         else:
             self.driver.switch_to_window(flow_handle)
 
-        # 1. Periksa apakah sesi akun Google belum terhubung dan bantu login secara langsung & otomatis jika diperlukan
-        self.prompt_and_login_if_needed()
+        # 1. Periksa apakah pengguna meminta pergantian akun (Account Vault Switcher)
+        self.switch_account_if_needed(self.email)
+
+        # 2. Periksa apakah sesi akun Google belum terhubung dan bantu login secara langsung & otomatis jika diperlukan
+        self.prompt_and_login_if_needed(self.email, self.password)
 
         # 2. Tutup dialog modal onboarding jika muncul di beranda
         self.dismiss_onboarding_dialog()
@@ -3178,6 +3357,23 @@ def main() -> int:
                     )
                     generator.delete_all_canvas_tiles()
                     curr_email = generator.get_current_user_email() or "Tidak terdeteksi"
+                    generator.save_account_to_vault(curr_email)
+
+                    vault_accounts = [
+                        acc["email"]
+                        for acc in generator.list_vault_accounts()
+                        if acc["email"].lower() != (curr_email or "").lower()
+                    ]
+                    vault_hint = ""
+                    if vault_accounts:
+                        vault_hint = (
+                            "\n• Atau beralih langsung ke akun cadangan di brankas lokal (tanpa login ulang):\n"
+                            + "\n".join(
+                                f"  [green]•[/green] [cyan]python image_generator.py --email {acc} ...[/cyan]"
+                                for acc in vault_accounts
+                            )
+                        )
+
                     console.print(
                         Panel(
                             f"[bold red]Akun Google Flow Anda telah mencapai batas penggunaan (Quota / Rate Limit).[/bold red]\n\n"
@@ -3185,8 +3381,9 @@ def main() -> int:
                             f"[yellow]• Pesan dari Google Flow:[/yellow] [white]{quota_err}[/white]\n\n"
                             "[bold white]Petunjuk & Saran Solusi:[/bold white]\n"
                             f"• Akun [cyan]{curr_email}[/cyan] sedang dibatasi sementara oleh Google Flow. Silakan coba kembali beberapa saat lagi.\n"
-                            "• Atau gunakan akun Google lain dengan memasukkan kredensial baru melalui flag:\n"
-                            "  [cyan]python image_generator.py --email akun_lain@gmail.com ...[/cyan]",
+                            f"• Atau gunakan akun Google lain dengan memasukkan kredensial baru melalui flag:\n"
+                            f"  [cyan]python image_generator.py --email akun_lain@gmail.com ...[/cyan]"
+                            f"{vault_hint}",
                             title=f"[bold red]Batas Penggunaan Google Flow Tercapai ({curr_email})[/bold red]",
                             box=box.ROUNDED,
                         )
