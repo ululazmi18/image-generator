@@ -375,18 +375,29 @@ result = generate("kue tart ulang tahun cokelat mewah", config=instagram_preset)
 ## 📂 Struktur Berkas Proyek
 
 ```text
-Image Generator/
-├── debug/                      # Direktori dokumentasi saat mode --debug aktif
-│   └── .gitkeep
-├── outputs/                    # Direktori penyimpanan hasil gambar resolusi 1K
-│   └── .gitkeep
-├── image_generator.py          # Modul otomasi Python & CLI Generator Gambar
+image-generator/
+├── image_generator/            # Paket Modul Python Utama (SoC & DRY)
+│   ├── __init__.py             # Entrypoint publik modul & ekspor API lengkap
+│   ├── client.py               # Stateful clients (ImageClient, AsyncImageClient) & helpers
+│   ├── constants.py            # Konstanta model, rasio, kuantitas & normalizer
+│   ├── core.py                 # Pengontrol otomasi Google Flow (ImageGenerator)
+│   ├── exceptions.py           # Hierarki pengecualian terstruktur (ImageGeneratorError)
+│   └── models.py               # Data models & schemas (Model, AspectRatio, GenerationResult)
+├── tests/                      # Rangkaian pengujian unit otomatis
+│   ├── test_cli.py
+│   ├── test_constants.py
+│   └── test_models.py
+├── image_generator.py          # Backward-compatibility shim untuk runner CLI & batch
+├── pyproject.toml              # Konfigurasi packaging modern PEP 517/518/621
 ├── run.bat                     # Runner batch Windows (klik ganda atau CLI)
 ├── requirements.txt            # Dependensi pustaka minimal (rich, Pillow)
+├── outputs/                    # Direktori penyimpanan hasil gambar resolusi 1K
+├── debug/                      # Direktori dokumentasi saat mode --debug aktif
 ├── LICENSE                     # Lisensi open-source MIT
 ├── .gitignore                  # Proteksi berkas lokal, cache, & output
 └── README.md                   # Panduan & dokumentasi resmi
 ```
+
 
 ---
 

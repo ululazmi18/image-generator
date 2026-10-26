@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "image-generator"
+version = "1.0.0"
+description = "Otomasi generasi gambar Google Flow latar belakang senyap (Silent Background Edition) tanpa mengontrol kursor mouse pengguna berbasis Firefox Portable Stealth."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Ulul Azmi" }
+]
+keywords = [
+    "google-flow",
+    "image-generation",
+    "nano-banana",
+    "stealth-automation",
+    "firefox-portable",
+    "marionette",
+    "zero-cursor-hijacking",
+    "ai-images"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: Microsoft :: Windows",
+]
+dependencies = [
+    "rich>=13.0.0",
+    "Pillow>=9.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[project.scripts]
+image-generator = "image_generator.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["image_generator*"]
+exclude = ["tests*", "debug*", "outputs*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
