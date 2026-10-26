@@ -1020,7 +1020,7 @@ class ImageGenerator:
         email_to_use = email or getattr(self, "email", None) or os.environ.get("GOOGLE_EMAIL")
         pwd_to_use = password or getattr(self, "password", None) or os.environ.get("GOOGLE_PASSWORD")
 
-        if not email_to_use:
+        if not email_to_use or not pwd_to_use:
             try:
                 connect_ask = Prompt.ask(
                     "[cyan]Apakah Anda ingin menghubungkan akun Google Flow sekarang? [Y/n][/cyan]",
@@ -1034,6 +1034,28 @@ class ImageGenerator:
                     "Akun Google belum terhubung. Diperlukan autentikasi akun Google Flow aktif "
                     "untuk dapat mengakses kanvas dan menghasilkan gambar."
                 )
+
+            console.print("\n[bold cyan]Silakan masukkan kredensial akun Google Anda untuk login otomatis (100% Full CLI):[/bold cyan]")
+            if not email_to_use:
+                while not email_to_use:
+                    try:
+                        email_to_use = Prompt.ask("[cyan]• Masukkan Email Google[/cyan]").strip()
+                    except (EOFError, KeyboardInterrupt):
+                        raise RuntimeError("Proses login dibatalkan oleh pengguna.")
+                    if not email_to_use:
+                        console.print("[warning]Alamat email tidak boleh kosong. Silakan masukkan email yang valid.[/warning]")
+
+            if not pwd_to_use:
+                while not pwd_to_use:
+                    try:
+                        pwd_to_use = Prompt.ask("[cyan]• Masukkan Kata Sandi Google[/cyan]", password=True).strip()
+                    except (EOFError, KeyboardInterrupt):
+                        raise RuntimeError("Proses login dibatalkan oleh pengguna.")
+                    if not pwd_to_use:
+                        console.print("[warning]Kata sandi tidak boleh kosong. Silakan masukkan kata sandi.[/warning]")
+
+            self.email = email_to_use
+            self.password = pwd_to_use
 
         # Temukan berkas login.py dari folder firefox-stealth-automation
         login_script_candidates = [
@@ -2872,6 +2894,26 @@ def main() -> int:
     retry_delay = 12.0
     start_main_ts = time.time()
 
+    generator = ImageGenerator(
+        model=model,
+        aspect_ratio=aspect_ratio,
+        count=count_str,
+        email=email_arg,
+        password=pwd_arg,
+        debug=debug,
+    )
+
+    try:
+        console.print("[info]ℹ Memeriksa peramban & kanvas Google Flow...[/info]")
+        generator.ensure_browser()
+        generator.connect()
+        generator.find_flow_tab()
+        generator.capture_debug_screenshot("01_canvas_ready", "Kondisi awal kanvas siap")
+    except Exception as init_err:
+        console.print(f"\n[error]✗ Kegagalan Otomasi:[/error] {init_err}")
+        generator.close()
+        return 1
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -2881,20 +2923,6 @@ def main() -> int:
         task = progress.add_task("[cyan]Menjalankan otomasi generasi gambar...", total=None)
 
         try:
-            progress.update(task, description="[cyan]Memverifikasi peramban & tab Google Flow...")
-            generator = ImageGenerator(
-                model=model,
-                aspect_ratio=aspect_ratio,
-                count=count_str,
-                email=email_arg,
-                password=pwd_arg,
-                debug=debug,
-            )
-            generator.ensure_browser()
-            generator.connect()
-            generator.find_flow_tab()
-            generator.capture_debug_screenshot("01_canvas_ready", "Kondisi awal kanvas siap")
-
             success = False
             attempt = 1
 
