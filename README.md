@@ -200,40 +200,175 @@ python image_generator.py --debug -p "elang emas hinggap di dahan pohon pinus"
 
 ---
 
-#### Metode C: Modul Python (*Callable API*)
+#### Metode C: Modul Python (*Callable API & Enterprise SDK*)
 
-Dapat diintegrasikan langsung ke dalam pipeline atau aplikasi Python Anda:
+Modul ini dirancang dengan fleksibilitas penuh untuk mendukung berbagai gaya pemrograman—mulai dari skrip sederhana satu baris (*legacy simple*), arsitektur terstruktur berbasis objek (*pro senior*), hingga pola *enterprise client session reuse* dan integrasi asinkron (*FastAPI/Asyncio*).
 
 ```python
-from image_generator import generate, generate_image
+from image_generator import (
+    generate,
+    generate_image,
+    generate_batch,
+    async_generate,
+    ImageClient,
+    Model,
+    AspectRatio,
+    Count,
+    GenerationConfig,
+)
+```
 
-# -------------------------------------------------------------
-# Cara 1: generate_image() — Mengembalikan path berkas lokal
-# -------------------------------------------------------------
-image_path = generate_image(
+---
+
+##### 1. Gaya Cepat & Sederhana (*Quick Scripting Style*)
+Mengembalikan objek `Path` berkas lokal langsung tanpa boilerplate. Sangat cocok untuk skrip otomasi cepat:
+
+```python
+from image_generator import generate_image
+
+# Mengembalikan Path absolut berkas .jpg lokal (atau list[Path] jika -c >= 2)
+path = generate_image(
     prompt="pemandangan matahari terbenam sinematik di pantai tropis",
     aspect_ratio="16:9",
     model="pro",
     output_path="outputs/sunset.jpg"
 )
-print(f"Gambar berhasil disimpan di: {image_path}")
+print(f"Gambar disimpan di: {path}")
+```
 
-# -------------------------------------------------------------
-# Cara 2: generate() — Mengembalikan objek GenerationResult
-# -------------------------------------------------------------
+---
+
+##### 2. Gaya Terstruktur Berbasis Objek (*Senior Pythonic / Dataclass Style*)
+Mengembalikan objek `GenerationResult` kaya metadata dan utilitas terintegrasi (Bytes, Base64, Pillow, JSON):
+
+```python
+from image_generator import generate, Model, AspectRatio, Count
+
 result = generate(
     prompt="lukisan cat minyak burung merak bercahaya",
-    aspect_ratio="1:1",
-    model="pro",
-    count=1
+    model=Model.PRO,                       # Type-safe autocomplete (IntelliSense)
+    aspect_ratio=AspectRatio.SQUARE_1_1,   # 1024x1024 px
+    count=Count.TWO,                       # 2 variasi gambar
 )
 
 if result.success:
-    print(f"Sukses ({result.duration_seconds:.1f}s): {result.image_path}")
-    print(f"Model: {result.model_name} | Rasio: {result.aspect_ratio}")
-else:
-    print(f"Gagal: {result.error_message}")
+    print(f"✅ Sukses dalam {result.duration_seconds:.1f} detik!")
+    print(f"Gambar Utama : {result.image_path}")
+    print(f"Daftar File  : {result.image_paths}")
+
+    # 1. Baca bytes mentah biner langsung tanpa open(..., 'rb')
+    raw_bytes = result.bytes
+
+    # 2. Konversi ke Base64 Data URI untuk frontend web / REST API
+    b64_uri = result.to_base64()  # "data:image/jpeg;base64,..."
+
+    # 3. Manipulasi visual langsung via Pillow (PIL.Image)
+    pil_image = result.to_pillow()
+    pil_image.thumbnail((512, 512))
+
+    # 4. Serialisasi metadata lengkap ke Dict atau JSON
+    print(result.to_json())
+
+    # 5. Iterasi langsung seluruh berkas variasi
+    for file_path in result:
+        print(f"Variasi: {file_path}")
 ```
+
+---
+
+##### 3. Gaya Enterprise Client & Sesi Terbuka (*Stateful Client / Session Reuse*)
+Menjaga peramban tetap hidup (*alive*) di antara pemanggilan berulang. Menghemat **15–30 detik per prompt** karena peramban tidak perlu dibuka dan ditutup kembali:
+
+```python
+from image_generator import ImageClient, Model, AspectRatio
+
+# Buka sesi satu kali dan gunakan untuk membuat banyak gambar berturut-turut
+with ImageClient(email="user@gmail.com", model=Model.PRO) as client:
+    res1 = client.generate("astronot berjalan di permukaan mars", aspect_ratio=AspectRatio.LANDSCAPE_16_9)
+    res2 = client.generate("koloni manusia di bawah kubah kaca mars", aspect_ratio=AspectRatio.LANDSCAPE_16_9)
+    res3 = client.generate("pesawat kargo mendarat di stasiun orbit", aspect_ratio=AspectRatio.PORTRAIT_9_16)
+
+# Atau gunakan batch generator otomatis dengan callback progres
+prompts = [
+    "mobil balap formula 1 di trek basah malam hari",
+    "motor gede klasik terparkir di depan kafe tokyo",
+    "sepeda fixie neon di jalanan kota masa depan",
+]
+
+def on_progress(current, total, result):
+    print(f"[{current}/{total}] Selesai: {result.image_path.name}")
+
+with ImageClient() as client:
+    results = client.batch(prompts, output_dir="outputs/kendaraan", on_progress=on_progress)
+```
+
+---
+
+##### 4. Gaya Asinkron Modern (*Asyncio / Non-Blocking for Web APIs & Bots*)
+Sangat ideal untuk backend modern (FastAPI, Starlette, aiohttp, Telegram bot, Discord bot) agar pembuatan gambar berjalan tanpa memblokir event loop:
+
+```python
+import asyncio
+from image_generator import async_generate, AsyncImageClient, Model
+
+async def main():
+    # Fungsi standalone async
+    result = await async_generate(
+        prompt="logo minimalis kedai kopi estetik",
+        model=Model.LITE,
+        aspect_ratio="1:1"
+    )
+    print(f"Hasil Async: {result.image_path}")
+
+    # Atau menggunakan Async Context Manager
+    async with AsyncImageClient() as client:
+        res = await client.generate("vector icon origami burung pelikan")
+        print(f"Icon: {res.image_path}")
+
+asyncio.run(main())
+```
+
+---
+
+##### 5. Gaya Konfigurasi Modular (*Configuration Object*)
+Mengelola parameter pembuatan gambar dalam satu konfigurasi terpusat yang dapat dioper ke fungsi atau disimpan sebagai preset:
+
+```python
+from image_generator import generate, GenerationConfig, Model, AspectRatio
+
+# Buat preset konfigurasi
+instagram_preset = GenerationConfig(
+    model=Model.PRO,
+    aspect_ratio=AspectRatio.SQUARE_1_1,
+    count=2,
+    timeout=120,
+    debug=False,
+)
+
+# Gunakan preset pada berbagai prompt
+result = generate("kue tart ulang tahun cokelat mewah", config=instagram_preset)
+```
+
+---
+
+##### 📋 Tabel Referensi Properti `GenerationResult`
+
+| Properti / Method | Tipe Data | Deskripsi |
+| :--- | :--- | :--- |
+| `.success` | `bool` | Status keberhasilan pembuatan gambar (`True` jika berhasil) |
+| `.image_path` | `Path` | Path absolut berkas gambar utama (alias dari `.file_path`) |
+| `.image_paths` | `list[Path]` | Daftar seluruh path berkas variasi (alias dari `.file_paths`) |
+| `.model_name` | `str` | Nama model AI yang digunakan (alias dari `.model`) |
+| `.duration_seconds`| `float` | Waktu proses render dan unduhan dalam detik |
+| `.bytes` | `bytes` | Bytes biner gambar utama (tanpa perlu membuka file manual) |
+| `.to_base64()` | `str` | Konversi gambar ke string Data URI Base64 (`data:image/jpeg;base64,...`) |
+| `.to_pillow()` | `PIL.Image` | Membuka gambar langsung sebagai objek Pillow Image |
+| `.to_dict()` | `dict` | Seluruh metadata dalam dictionary Python |
+| `.to_json()` | `str` | Serialisasi seluruh metadata ke JSON string |
+| `.save_to(dest)` | `Path` | Menyalin berkas gambar ke direktori/nama lain |
+| `len(result)` | `int` | Jumlah variasi gambar yang dihasilkan |
+| `result[0]` | `Path` | Mengakses path gambar ke-n secara langsung |
+| `for p in result:` | `Iterator[Path]` | Iterasi langsung atas seluruh berkas hasil |
 
 ---
 

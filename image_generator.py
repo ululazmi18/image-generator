@@ -15,21 +15,34 @@ Fitur Utama:
    Memasukkan teks prompt -> Memicu pembuatan gambar -> Memantau progres (0%-100%) ->
    Mengunduh resolusi asli 1K -> Memindahkan berkas ke folder tujuan -> Menghapus tile
    dari kanvas Google Flow ('Pindahkan ke sampah').
-4. Fleksibel (Callable & CLI):
-   Dapat diimpor sebagai fungsi Python (`from image_generator import generate_image`)
-   atau dijalankan langsung via terminal/CLI (`run.bat --prompt "..."`).
+4. Fleksibel (Callable, Enterprise Client, Async & CLI):
+   Dapat dijalankan langsung via terminal (`run.bat` / CLI) atau diimpor sebagai modul Python
+   tingkat enterprise dengan dukungan 5 gaya pemrograman:
+   - Sederhana (*Quick Scripting*): `generate_image("prompt")`
+   - Berbasis Objek (*Dataclass Result*): `generate("prompt", model=Model.PRO)`
+   - Klien Berstatus (*Session Reuse*): `with ImageClient() as client: client.generate(...)`
+   - Asinkron Modern (*FastAPI/Asyncio*): `await async_generate("prompt")`
+   - Pemrosesan Sekumpulan (*Batch*): `generate_batch(["p1", "p2"])`
 
 Contoh Penggunaan Singkat:
-    # Sebagai CLI via batch runner:
-    run.bat --prompt pemandangan gunung bersalju saat fajar sinematik -o hasil/
+    # 1. Sebagai CLI via batch runner:
+    run.bat -m pro -a 16:9 -p "pemandangan gunung bersalju fajar"
 
-    # Sebagai Modul Python:
+    # 2. Sebagai Modul Python (Quick):
     from image_generator import generate_image
-    file_hasil = generate_image("kucing lucu di taman bunga", output_path="outputs/")
-    print(f"Gambar tersimpan di: {file_hasil}")
+    path = generate_image("kucing lucu di taman bunga", output_path="outputs/")
+
+    # 3. Sebagai Enterprise Client (Session Reuse):
+    from image_generator import ImageClient, Model, AspectRatio
+    with ImageClient(model=Model.PRO) as client:
+        res = client.generate("astronot melayang di angkasa", aspect_ratio=AspectRatio.SQUARE_1_1)
+        print(f"Hasil ({res.duration_seconds:.1f}s): {res.image_path}")
 """
 
+import asyncio
+import base64
 import datetime
+from enum import Enum
 import json
 import os
 import re
@@ -41,7 +54,7 @@ import time
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Callable, Iterator, Literal, Sequence, Union
 
 # Standar encoding UTF-8 untuk terminal Windows
 try:
@@ -51,21 +64,37 @@ except Exception:
     pass
 
 __all__ = [
+    # Classes & Clients
     "ImageGenerator",
-    "generate_image",
-    "generate",
+    "ImageClient",
+    "FlowClient",
+    "ImageGeneratorClient",
+    "AsyncImageClient",
+    "AsyncFlowClient",
     "GenerationConfig",
     "GenerationResult",
     "GenerationFailedError",
+    "QuotaExceededError",
+    # Enums & Constants
+    "Model",
+    "AspectRatio",
+    "Count",
     "AVAILABLE_MODELS",
     "AVAILABLE_ASPECT_RATIOS",
     "AVAILABLE_COUNTS",
     "DEFAULT_MODEL",
     "DEFAULT_ASPECT_RATIO",
     "DEFAULT_COUNT",
+    # High-Level Functions
+    "generate",
+    "generate_image",
+    "generate_batch",
+    "async_generate",
+    "async_generate_image",
     "normalize_model",
     "normalize_aspect_ratio",
     "normalize_count",
+    "resolve_target_file_path",
 ]
 
 
@@ -248,26 +277,71 @@ def normalize_count(val: int | str | None) -> str:
     return f"x{DEFAULT_COUNT}"
 
 
+class Model(str, Enum):
+    """Model AI Google Flow resmi."""
+
+    PRO = "pro"
+    LITE = "lite"
+    V2_1 = "2.1"
+    NANO_BANANA_PRO = "Nano Banana Pro"
+    NANO_BANANA_LITE = "Nano Banana 2 Lite"
+    NANO_BANANA_2_1 = "Nano Banana 2.1"
+
+
+class AspectRatio(str, Enum):
+    """Aspek rasio gambar resmi Google Flow."""
+
+    LANDSCAPE_16_9 = "16:9"
+    STANDARD_4_3 = "4:3"
+    SQUARE_1_1 = "1:1"
+    PORTRAIT_3_4 = "3:4"
+    PORTRAIT_9_16 = "9:16"
+    # Alias umum
+    WIDE = "16:9"
+    SQUARE = "1:1"
+    VERTICAL = "9:16"
+
+
+class Count(int, Enum):
+    """Kuantitas variasi gambar yang dihasilkan."""
+
+    ONE = 1
+    TWO = 2
+    THREE = 3
+    FOUR = 4
+
+
 @dataclass
 class GenerationConfig:
-    """Objek konfigurasi parameter pembuatan gambar untuk layanan modul Python."""
+    """Objek konfigurasi pembuatan gambar untuk integrasi modul Python tingkat enterprise."""
 
-    model: str = DEFAULT_MODEL
-    aspect_ratio: str = DEFAULT_ASPECT_RATIO
-    count: int = DEFAULT_COUNT
+    model: str | Model = DEFAULT_MODEL
+    aspect_ratio: str | AspectRatio = DEFAULT_ASPECT_RATIO
+    count: int | Count | str = DEFAULT_COUNT
+    output_path: str | Path | None = None
+    timeout: int = 180
+    max_retries: int | None = None
+    retry_delay: float = 12.0
+    email: str | None = None
+    password: str | None = None
+    auto_launch: bool = True
+    debug: bool = False
 
     def normalized(self) -> tuple[str, str, str]:
         """Mengembalikan tuple ternormalisasi (model_resmi, aspek_rasio, string_kuantitas)."""
+        m = self.model.value if isinstance(self.model, Model) else self.model
+        a = self.aspect_ratio.value if isinstance(self.aspect_ratio, AspectRatio) else self.aspect_ratio
+        c = self.count.value if isinstance(self.count, Count) else self.count
         return (
-            normalize_model(self.model),
-            normalize_aspect_ratio(self.aspect_ratio),
-            normalize_count(self.count),
+            normalize_model(m),
+            normalize_aspect_ratio(a),
+            normalize_count(c),
         )
 
 
 @dataclass
 class GenerationResult:
-    """Hasil keluaran proses pembuatan gambar lengkap dengan metadata teknis."""
+    """Hasil keluaran proses pembuatan gambar lengkap dengan metadata teknis dan utilitas modern."""
 
     file_path: Path
     prompt: str
@@ -277,18 +351,114 @@ class GenerationResult:
     attempt: int
     duration_seconds: float
     file_paths: list[Path] = field(default_factory=list)
+    success: bool = True
+    error_message: str | None = None
 
     def __post_init__(self) -> None:
+        if isinstance(self.file_path, str):
+            self.file_path = Path(self.file_path)
         if not self.file_paths and self.file_path:
             self.file_paths = [self.file_path]
         elif self.file_paths and not self.file_path:
             self.file_path = self.file_paths[0]
+        self.file_paths = [Path(p) if isinstance(p, str) else p for p in self.file_paths]
+
+    @property
+    def image_path(self) -> Path:
+        """Alias untuk file_path (lokasi berkas gambar utama)."""
+        return self.file_path
+
+    @property
+    def image_paths(self) -> list[Path]:
+        """Alias untuk file_paths (daftar seluruh berkas gambar hasil generasi)."""
+        return self.file_paths
+
+    @property
+    def model_name(self) -> str:
+        """Alias untuk nama model AI."""
+        return self.model
+
+    @property
+    def bytes(self) -> bytes:
+        """Bytes biner mentah dari gambar utama."""
+        return self.read_bytes(0)
+
+    def read_bytes(self, index: int = 0) -> bytes:
+        """Membaca bytes biner dari gambar ke-index."""
+        target = self.file_paths[index] if 0 <= index < len(self.file_paths) else self.file_path
+        return target.read_bytes()
+
+    def to_base64(self, index: int = 0, data_uri: bool = True) -> str:
+        """Mengonversi berkas gambar ke string Base64 (data URI atau base64 mentah)."""
+        b = self.read_bytes(index)
+        encoded = base64.b64encode(b).decode("ascii")
+        if data_uri:
+            return f"data:image/jpeg;base64,{encoded}"
+        return encoded
+
+    def to_pillow(self, index: int = 0) -> Any:
+        """Membuka gambar sebagai objek PIL.Image (Pillow) jika terpasang di sistem."""
+        try:
+            from PIL import Image
+
+            target = self.file_paths[index] if 0 <= index < len(self.file_paths) else self.file_path
+            return Image.open(target)
+        except ImportError:
+            raise ImportError(
+                "Pustaka Pillow belum terpasang. Pasang dengan 'pip install Pillow' untuk menggunakan .to_pillow()."
+            )
+
+    @property
+    def image(self) -> Any:
+        """Objek PIL Image dari gambar utama."""
+        return self.to_pillow(0)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Mengonversi seluruh metadata hasil generasi menjadi dictionary Python."""
+        return {
+            "success": self.success,
+            "file_path": str(self.file_path),
+            "file_paths": [str(p) for p in self.file_paths],
+            "prompt": self.prompt,
+            "model": self.model,
+            "aspect_ratio": self.aspect_ratio,
+            "count": self.count,
+            "attempt": self.attempt,
+            "duration_seconds": self.duration_seconds,
+            "error_message": self.error_message,
+        }
+
+    def to_json(self, indent: int = 2) -> str:
+        """Mengonversi metadata hasil generasi ke format JSON string."""
+        return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False)
+
+    def save_to(self, destination: str | Path, index: int = 0) -> Path:
+        """Menyimpan atau menyalin berkas gambar hasil generasi ke path tujuan lain."""
+        src = self.file_paths[index] if 0 <= index < len(self.file_paths) else self.file_path
+        dest = Path(destination).resolve()
+        if dest.is_dir():
+            dest = dest / src.name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(src), str(dest))
+        return dest
 
     def __str__(self) -> str:
         return str(self.file_path)
 
     def __fspath__(self) -> str:
         return str(self.file_path)
+
+    def __len__(self) -> int:
+        return len(self.file_paths)
+
+    def __getitem__(self, index: int) -> Path:
+        return self.file_paths[index]
+
+    def __iter__(self) -> Iterator[Path]:
+        return iter(self.file_paths)
+
+    def __bool__(self) -> bool:
+        return self.success and bool(self.file_path and self.file_path.exists())
 
 
 def resolve_target_file_path(
@@ -2520,6 +2690,144 @@ class ImageGenerator:
         self.delete_all_canvas_tiles()
         return True
 
+    def generate_flow(
+        self,
+        prompt: str,
+        output_path: str | Path | None = None,
+        timeout: int = 180,
+        max_retries: int | None = None,
+        retry_delay: float = 12.0,
+        start_ts: float | None = None,
+    ) -> GenerationResult:
+        """Mengeksekusi satu siklus penuh pembuatan gambar pada sesi kanvas peramban aktif.
+
+        Args:
+            prompt (str): Deskripsi gambar yang akan dibuat.
+            output_path (str | Path | None): Lokasi atau nama file penyimpanan gambar.
+            timeout (int): Batas waktu maksimal proses render per percobaan (detik).
+            max_retries (int | None): Batas percobaan maksimal jika terjadi kegagalan render.
+            retry_delay (float): Jeda waktu antar-percobaan render (detik).
+            start_ts (float | None): Waktu mulai eksekusi untuk pencatatan durasi.
+
+        Returns:
+            GenerationResult: Objek terstruktur kaya metadata hasil pembuatan gambar.
+        """
+        if start_ts is None:
+            start_ts = time.time()
+
+        last_error = None
+        attempt = 1
+        while True:
+            if max_retries is not None and attempt > max_retries:
+                raise RuntimeError(
+                    f"Gagal membuat gambar setelah {max_retries} kali percobaan berturut-turut. Kesalahan terakhir: {last_error}"
+                )
+
+            try:
+                # Bersihkan SELURUH tile di kanvas agar kanvas selalu kosong sebelum generasi baru
+                self.delete_all_canvas_tiles()
+
+                # Segarkan halaman jika beberapa kali percobaan berturut-turut gagal
+                if attempt > 1 and attempt % 4 == 0:
+                    try:
+                        nav_url = getattr(self, "current_project_url", None) or FLOW_HOME_URL
+                        self.driver.navigate(nav_url)
+                        time.sleep(3.5)
+                        self.find_flow_tab()
+                        self.capture_debug_screenshot(
+                            f"page_refresh_att_{attempt}",
+                            f"Penyegaran halaman kanvas (Percobaan ke-{attempt})",
+                        )
+                    except Exception:
+                        pass
+
+                existing = set()
+                for d in self.download_dirs:
+                    if d.exists():
+                        for f in list(d.glob("*.jpg")) + list(d.glob("*.jpeg")):
+                            existing.add(str(f.resolve()))
+
+                initial_state = self.submit_prompt(prompt)
+                self.capture_debug_screenshot(
+                    f"prompt_submitted_att_{attempt}",
+                    f"Prompt dikirim (Percobaan ke-{attempt})",
+                )
+
+                self.hover_and_wait_tile(initial_state=initial_state, timeout=timeout)
+                self.capture_debug_screenshot(
+                    f"render_success_att_{attempt}",
+                    f"Render selesai (Percobaan ke-{attempt})",
+                )
+
+                expected_num = 1
+                try:
+                    expected_num = int(str(self.count_str).replace("x", "").strip())
+                except Exception:
+                    expected_num = 1
+
+                downloaded_files = self.download_all_tiles(
+                    expected_count=expected_num,
+                    existing_files=existing,
+                    timeout=60,
+                )
+                self.capture_debug_screenshot(
+                    f"download_completed_att_{attempt}",
+                    f"Unduhan {len(downloaded_files)} gambar selesai (Percobaan ke-{attempt})",
+                )
+
+                # Pemindahan seluruh berkas unduhan ke lokasi tujuan dengan penamaan resolusi standar
+                target_files: list[Path] = []
+                total_dl = len(downloaded_files)
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+                for idx, dl_file in enumerate(downloaded_files):
+                    dest_file = resolve_target_file_path(
+                        output_path=output_path,
+                        prompt=prompt,
+                        index=idx,
+                        total_count=total_dl,
+                        workspace_dir=self.workspace_dir,
+                        timestamp=timestamp,
+                    )
+                    shutil.move(str(dl_file), str(dest_file))
+                    target_files.append(dest_file)
+
+                # Hapus SELURUH gambar dari kanvas peramban setelah berkas aman tersimpan
+                try:
+                    self.delete_all_canvas_tiles()
+                    self.capture_debug_screenshot("canvas_after_cleanup", "Pembersihan kanvas selesai")
+                except Exception as del_err:
+                    console.print(f"[warning]⚠ Catatan pembersihan: {del_err}[/warning]")
+
+                duration = time.time() - start_ts
+                primary_file = target_files[0] if target_files else (self.workspace_dir / "outputs" / "unknown.jpg")
+                return GenerationResult(
+                    file_path=primary_file,
+                    file_paths=target_files,
+                    prompt=prompt,
+                    model=self.model,
+                    aspect_ratio=self.aspect_ratio,
+                    count=self.count_str,
+                    attempt=attempt,
+                    duration_seconds=duration,
+                    success=True,
+                )
+
+            except (GenerationFailedError, TimeoutError) as attempt_err:
+                last_error = attempt_err
+                self.capture_debug_screenshot(
+                    f"failure_state_att_{attempt}",
+                    f"Visual kegagalan (Percobaan ke-{attempt}): {attempt_err}",
+                )
+                self.delete_all_canvas_tiles()
+                retry_tag = f"Percobaan ke-{attempt}" if max_retries is None else f"Percobaan {attempt}/{max_retries}"
+                console.print(
+                    f"[warning]⚠ {retry_tag} terdeteksi gagal ({attempt_err}). "
+                    f"Mengulang dari input prompt dalam {retry_delay:.0f} detik...[/warning]"
+                )
+                time.sleep(retry_delay)
+                attempt += 1
+
     def close(self) -> None:
         """Menutup koneksi soket Marionette dan menghentikan proses peramban latar belakang jika dibuat oleh skrip.
 
@@ -2527,7 +2835,11 @@ class ImageGenerator:
         metode ini akan menghentikan proses peramban tersebut secara bersih untuk melepaskan penguncian
         profil ('parent.lock') dan membebaskan memori RAM sistem.
         """
-        self.driver.close()
+        if hasattr(self, "driver") and self.driver:
+            try:
+                self.driver.close()
+            except Exception:
+                pass
         if self.proc is not None:
             try:
                 subprocess.run(
@@ -2555,14 +2867,213 @@ class ImageGenerator:
 
 
 # ==============================================================================
-# HIGH-LEVEL CALLABLE API FUNCTIONS (UNTUK LAYANAN MODUL PYTHON PROFESIONAL)
+# HIGH-LEVEL CLIENTS & ENTERPRISE PYTHON SERVICES
 # ==============================================================================
-def generate_image(
+
+class ImageClient:
+    """Klien berstatus (*stateful client*) tingkat enterprise untuk generasi gambar Google Flow.
+
+    Mempertahankan koneksi peramban aktif (*session reuse*) di antara pemanggilan berulang,
+    menghemat 15-30 detik per pembuatan gambar dibanding membuka-tutup peramban setiap saat.
+    Dapat digunakan langsung atau sebagai context manager (`with ImageClient() as client:`).
+
+    Contoh Penggunaan:
+        >>> with ImageClient(model="pro", aspect_ratio="16:9") as client:
+        ...     res1 = client.generate("mobil balap futuristik di tokyo fajar")
+        ...     res2 = client.generate("mobil balap klasik di pedesaan inggris")
+        ...     print(f"Hasil 1: {res1.image_path}")
+        ...     print(f"Hasil 2: {res2.image_path}")
+    """
+
+    def __init__(
+        self,
+        workspace_dir: Path | None = None,
+        model: str | Model = DEFAULT_MODEL,
+        aspect_ratio: str | AspectRatio = DEFAULT_ASPECT_RATIO,
+        count: int | Count | str = DEFAULT_COUNT,
+        email: str | None = None,
+        password: str | None = None,
+        auto_launch: bool = True,
+        debug: bool = False,
+    ):
+        self.workspace_dir = workspace_dir
+        self.default_model = model.value if isinstance(model, Model) else model
+        self.default_aspect_ratio = aspect_ratio.value if isinstance(aspect_ratio, AspectRatio) else aspect_ratio
+        self.default_count = count.value if isinstance(count, Count) else count
+        self.email = email
+        self.password = password
+        self.auto_launch = auto_launch
+        self.debug = debug
+        self._generator: ImageGenerator | None = None
+
+    def __enter__(self) -> "ImageClient":
+        self._ensure_generator()
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
+    def _ensure_generator(
+        self,
+        model: str | Model | None = None,
+        aspect_ratio: str | AspectRatio | None = None,
+        count: int | Count | str | None = None,
+    ) -> ImageGenerator:
+        req_model = model.value if isinstance(model, Model) else model
+        req_ratio = aspect_ratio.value if isinstance(aspect_ratio, AspectRatio) else aspect_ratio
+        req_count = count.value if isinstance(count, Count) else count
+
+        target_model = normalize_model(req_model or self.default_model)
+        target_ratio = normalize_aspect_ratio(req_ratio or self.default_aspect_ratio)
+        target_count = normalize_count(req_count if req_count is not None else self.default_count)
+
+        if self._generator is None:
+            self._generator = ImageGenerator(
+                workspace_dir=self.workspace_dir,
+                model=target_model,
+                aspect_ratio=target_ratio,
+                count=target_count,
+                email=self.email,
+                password=self.password,
+                debug=self.debug,
+            )
+            self._generator.ensure_browser(auto_launch=self.auto_launch)
+            self._generator.connect()
+            self._generator.find_flow_tab()
+            self._generator.capture_debug_screenshot("01_canvas_ready", "Kondisi awal kanvas siap")
+        else:
+            self._generator.model = target_model
+            self._generator.aspect_ratio = target_ratio
+            self._generator.count_str = target_count
+
+        return self._generator
+
+    def generate(
+        self,
+        prompt: str,
+        output_path: str | Path | None = None,
+        model: str | Model | None = None,
+        aspect_ratio: str | AspectRatio | None = None,
+        count: int | Count | str | None = None,
+        timeout: int = 180,
+        max_retries: int | None = None,
+        retry_delay: float = 12.0,
+        config: GenerationConfig | None = None,
+        **kwargs: Any,
+    ) -> GenerationResult:
+        """Menghasilkan gambar dalam sesi peramban aktif dan mengembalikan objek `GenerationResult`."""
+        if config is not None:
+            model = model or config.model
+            aspect_ratio = aspect_ratio or config.aspect_ratio
+            count = count if count is not None else config.count
+            output_path = output_path or config.output_path
+            timeout = timeout if timeout != 180 else config.timeout
+            max_retries = max_retries if max_retries is not None else config.max_retries
+            retry_delay = retry_delay if retry_delay != 12.0 else config.retry_delay
+
+        gen = self._ensure_generator(model=model, aspect_ratio=aspect_ratio, count=count)
+        return gen.generate_flow(
+            prompt=prompt,
+            output_path=output_path,
+            timeout=timeout,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+        )
+
+    def generate_image(
+        self,
+        prompt: str,
+        output_path: str | Path | None = None,
+        **kwargs: Any,
+    ) -> Path | list[Path]:
+        """Shorthand yang mengembalikan Path berkas lokal (atau list[Path] jika -c >= 2)."""
+        res = self.generate(prompt=prompt, output_path=output_path, **kwargs)
+        if len(res.file_paths) > 1:
+            return res.file_paths
+        return res.file_path
+
+    def batch(
+        self,
+        prompts: Sequence[str],
+        output_dir: str | Path | None = None,
+        on_progress: Callable[[int, int, GenerationResult], None] | None = None,
+        **kwargs: Any,
+    ) -> list[GenerationResult]:
+        """Menghasilkan sekumpulan gambar secara sekuensial dalam satu sesi peramban aktif."""
+        results: list[GenerationResult] = []
+        total = len(prompts)
+        for idx, p in enumerate(prompts):
+            res = self.generate(prompt=p, output_path=output_dir, **kwargs)
+            results.append(res)
+            if on_progress:
+                on_progress(idx + 1, total, res)
+        return results
+
+    def close(self) -> None:
+        """Menutup koneksi soket dan mematikan peramban latar belakang jika diluncurkan oleh klien."""
+        if self._generator is not None:
+            try:
+                self._generator.close()
+            finally:
+                self._generator = None
+
+
+# Alias resmi untuk ImageClient
+FlowClient = ImageClient
+ImageGeneratorClient = ImageClient
+
+
+class AsyncImageClient:
+    """Klien asynchronous non-blocking berbasis `ImageClient` untuk framework modern (FastAPI, asyncio, bot)."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self._sync_client = ImageClient(*args, **kwargs)
+
+    async def __aenter__(self) -> "AsyncImageClient":
+        await asyncio.to_thread(self._sync_client.__enter__)
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        await asyncio.to_thread(self._sync_client.__exit__, exc_type, exc_val, exc_tb)
+
+    async def generate(self, prompt: str, **kwargs: Any) -> GenerationResult:
+        """Versi asynchronous dari generate()."""
+        return await asyncio.to_thread(self._sync_client.generate, prompt, **kwargs)
+
+    async def generate_image(self, prompt: str, **kwargs: Any) -> Path | list[Path]:
+        """Versi asynchronous dari generate_image()."""
+        return await asyncio.to_thread(self._sync_client.generate_image, prompt, **kwargs)
+
+    async def batch(
+        self,
+        prompts: Sequence[str],
+        output_dir: str | Path | None = None,
+        on_progress: Callable[[int, int, GenerationResult], None] | None = None,
+        **kwargs: Any,
+    ) -> list[GenerationResult]:
+        """Versi asynchronous dari batch()."""
+        return await asyncio.to_thread(
+            self._sync_client.batch, prompts, output_dir=output_dir, on_progress=on_progress, **kwargs
+        )
+
+    async def close(self) -> None:
+        """Versi asynchronous dari close()."""
+        await asyncio.to_thread(self._sync_client.close)
+
+
+AsyncFlowClient = AsyncImageClient
+
+
+# ==============================================================================
+# HIGH-LEVEL CALLABLE API FUNCTIONS (COMPATIBLE & VERSATILE)
+# ==============================================================================
+
+def generate(
     prompt: str,
     output_path: str | Path | None = None,
-    model: str = DEFAULT_MODEL,
-    aspect_ratio: str = DEFAULT_ASPECT_RATIO,
-    count: int | str = DEFAULT_COUNT,
+    model: str | Model = DEFAULT_MODEL,
+    aspect_ratio: str | AspectRatio = DEFAULT_ASPECT_RATIO,
+    count: int | Count | str = DEFAULT_COUNT,
     email: str | None = None,
     password: str | None = None,
     timeout: int = 180,
@@ -2570,65 +3081,100 @@ def generate_image(
     retry_delay: float = 12.0,
     auto_launch: bool = True,
     debug: bool = False,
-    **kwargs: object,
-) -> Path:
-    """Fungsi utama tingkat tinggi untuk membuat, mengunduh, dan menyimpan gambar secara senyap.
+    client: ImageClient | None = None,
+    config: GenerationConfig | None = None,
+    **kwargs: Any,
+) -> GenerationResult:
+    """Layanan modul Python tingkat profesional yang mengembalikan objek `GenerationResult` lengkap.
 
-    Fungsi ini menjalankan seluruh siklus kerja otomasi Google Flow secara 100% natif
-    dalam mode headless di latar belakang tanpa jendela GUI dan tanpa mengganggu kursor (*zero cursor hijacking*):
-    1. Memverifikasi/menjalankan Firefox Portable secara otomatis dalam mode -headless murni.
-    2. Mendeteksi tab Google Flow aktif atau mengarahkannya ke proyek.
-    3. Mengonfigurasi model AI (Banana Pro/Lite/2.1), aspek rasio (16:9, 1:1, 9:16, dll), dan kuantitas (x1-x4).
-    4. Membersihkan kanvas dari seluruh tile lama agar steril.
-    5. Mengisi prompt ke editor ProseMirror via native keystrokes dan memicu pembuatan gambar.
-    6. Memantau progres hingga generasi selesai (0% -> 100%).
-    7. Mengunduh gambar dalam resolusi asli 1K.
-    8. Memindahkan berkas gambar dari folder unduhan ke direktori tujuan yang diminta.
-    9. Menghapus tile gambar dari kanvas Google Flow ('Pindahkan ke sampah').
-
-    Fitur Pemulihan Mandiri Tanpa Batas (Unlimited Self-Healing Auto-Retry):
-    Jika proses render gagal di sisi Google Flow (misal terkena batas penggunaan atau kendala server),
-    fungsi secara otomatis mendeteksi tile gagal, membersihkannya dari kanvas, menunggu jeda cooldown,
-    menyegarkan halaman jika diperlukan, dan terus mencoba ulang tanpa batasan sampai berkas gambar berhasil diperoleh.
+    Mendukung berbagai gaya pemanggilan:
+    1. Standar: `generate("prompt")`
+    2. Enums: `generate("prompt", model=Model.PRO, aspect_ratio=AspectRatio.SQUARE_1_1)`
+    3. Konfigurasi: `generate("prompt", config=cfg)`
+    4. Sesi Reusable: `generate("prompt", client=client)`
 
     Args:
         prompt (str): Deskripsi teks gambar yang ingin dibuat.
-        output_path (str | Path | None): Jalur folder atau berkas tujuan penyimpanan gambar.
-            - Jika berupa folder: berkas disimpan dengan format slug prompt dan timestamp.
-            - Jika berupa path berkas .jpg: berkas disimpan persis dengan nama tersebut.
-            - Jika None: otomatis disimpan di folder 'outputs/' pada root workspace.
-        model (str): Rangkaian model AI (misal: 'Nano Banana Pro', 'Nano Banana 2 Lite', 'Nano Banana 2.1').
-                     Dapat juga menggunakan singkatan: 'pro', 'lite', '2.1'. Default: 'Nano Banana Pro'.
-        aspect_ratio (str): Aspek rasio gambar ('16:9', '4:3', '1:1', '3:4', '9:16' atau alias 'square', 'vertical').
-                            Default: '16:9'.
-        count (int | str): Kuantitas variasi gambar per generasi (1, 2, 3, 4 atau 'x1', 'x2', dst). Default: 1.
+        output_path (str | Path | None): Jalur folder atau nama file tujuan.
+        model (str | Model): Model AI Google Flow (default: 'pro' / 'Nano Banana Pro').
+        aspect_ratio (str | AspectRatio): Aspek rasio kanvas gambar (default: '16:9').
+        count (int | Count | str): Kuantitas variasi gambar per generasi (default: 1).
         email (str | None): Alamat email Google opsional untuk login otomatis mandiri.
         password (str | None): Kata sandi Google opsional untuk login otomatis mandiri.
-        timeout (int): Batas waktu maksimal proses pembuatan gambar per percobaan dalam detik (default: 180).
-        max_retries (int | None): Batas maksimal percobaan ulang (default: None, mengulang tanpa batas).
-        retry_delay (float): Jeda waktu dalam detik sebelum mengulang percobaan berikutnya (default: 12.0).
-        auto_launch (bool): Luncurkan Firefox Portable secara otomatis jika belum berjalan (default: True).
-        debug (bool): Aktifkan mode debug untuk mendokumentasikan setiap langkah via tangkapan layar (default: False).
-        **kwargs: Parameter opsional kompatibilitas mundur.
+        timeout (int): Batas waktu maksimal per percobaan dalam detik (default: 180).
+        max_retries (int | None): Batas percobaan maksimal (default: None, tanpa batas).
+        retry_delay (float): Waktu tunggu antar-percobaan dalam detik (default: 12.0).
+        auto_launch (bool): Luncurkan peramban headless otomatis jika belum aktif (default: True).
+        debug (bool): Simpan tangkapan layar debug visual (default: False).
+        client (ImageClient | None): Instance klien aktif untuk sesi berkelanjutan (opsional).
+        config (GenerationConfig | None): Objek konfigurasi alternatif (opsional).
 
     Returns:
-        Path: Lokasi absolut berkas gambar .jpg yang berhasil dibuat dan dipindahkan.
-
-    Raises:
-        RuntimeError: Jika seluruh percobaan gagal atau terjadi kegagalan fatal koneksi peramban.
-        TimeoutError: Jika waktu tunggu pembuatan gambar atau pengunduhan habis.
-
-    Example:
-        >>> from image_generator import generate_image
-        >>> # Generasi vertikal 9:16 untuk Reel / Shorts
-        >>> file_path = generate_image(
-        ...     prompt="astronot melayang di ruang angkasa fajar",
-        ...     aspect_ratio="9:16",
-        ...     model="pro",
-        ...     output_path="hasil/"
-        ... )
-        >>> print("Gambar disimpan di:", file_path)
+        GenerationResult: Objek terstruktur kaya metadata, bytes, to_base64(), to_pillow(), metadata, dll.
     """
+    if config is not None:
+        model = config.model
+        aspect_ratio = config.aspect_ratio
+        count = count if count != DEFAULT_COUNT else config.count
+        output_path = output_path or config.output_path
+        timeout = timeout if timeout != 180 else config.timeout
+        max_retries = max_retries if max_retries is not None else config.max_retries
+        retry_delay = retry_delay if retry_delay != 12.0 else config.retry_delay
+        email = email or config.email
+        password = password or config.password
+        auto_launch = config.auto_launch
+        debug = config.debug
+
+    if client is not None:
+        return client.generate(
+            prompt=prompt,
+            output_path=output_path,
+            model=model,
+            aspect_ratio=aspect_ratio,
+            count=count,
+            timeout=timeout,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            **kwargs,
+        )
+
+    with ImageClient(
+        model=model,
+        aspect_ratio=aspect_ratio,
+        count=count,
+        email=email,
+        password=password,
+        auto_launch=auto_launch,
+        debug=debug,
+    ) as temp_client:
+        return temp_client.generate(
+            prompt=prompt,
+            output_path=output_path,
+            timeout=timeout,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            **kwargs,
+        )
+
+
+def generate_image(
+    prompt: str,
+    output_path: str | Path | None = None,
+    model: str | Model = DEFAULT_MODEL,
+    aspect_ratio: str | AspectRatio = DEFAULT_ASPECT_RATIO,
+    count: int | Count | str = DEFAULT_COUNT,
+    email: str | None = None,
+    password: str | None = None,
+    timeout: int = 180,
+    max_retries: int | None = None,
+    retry_delay: float = 12.0,
+    auto_launch: bool = True,
+    debug: bool = False,
+    client: ImageClient | None = None,
+    config: GenerationConfig | None = None,
+    **kwargs: Any,
+) -> Path | list[Path]:
+    """Fungsi praktis klasik yang mengembalikan Path berkas gambar (atau list[Path] jika variasi >= 2)."""
     res = generate(
         prompt=prompt,
         output_path=output_path,
@@ -2642,6 +3188,8 @@ def generate_image(
         retry_delay=retry_delay,
         auto_launch=auto_launch,
         debug=debug,
+        client=client,
+        config=config,
         **kwargs,
     )
     if len(res.file_paths) > 1:
@@ -2649,171 +3197,48 @@ def generate_image(
     return res.file_path
 
 
-def generate(
-    prompt: str,
-    output_path: str | Path | None = None,
-    model: str = DEFAULT_MODEL,
-    aspect_ratio: str = DEFAULT_ASPECT_RATIO,
-    count: int | str = DEFAULT_COUNT,
+def generate_batch(
+    prompts: Sequence[str],
+    output_dir: str | Path | None = None,
+    model: str | Model = DEFAULT_MODEL,
+    aspect_ratio: str | AspectRatio = DEFAULT_ASPECT_RATIO,
+    count: int | Count | str = DEFAULT_COUNT,
     email: str | None = None,
     password: str | None = None,
-    timeout: int = 180,
-    max_retries: int | None = None,
-    retry_delay: float = 12.0,
-    auto_launch: bool = True,
-    debug: bool = False,
-    **kwargs: object,
-) -> GenerationResult:
-    """Layanan modul Python tingkat profesional yang mengembalikan objek `GenerationResult` lengkap.
+    client: ImageClient | None = None,
+    progress_callback: Callable[[int, int, GenerationResult], None] | None = None,
+    **kwargs: Any,
+) -> list[GenerationResult]:
+    """Menghasilkan banyak gambar dari sekumpulan prompt secara efisien dalam satu sesi peramban aktif."""
+    if client is not None:
+        return client.batch(prompts, output_dir=output_dir, on_progress=progress_callback, **kwargs)
 
-    Args:
-        prompt (str): Deskripsi teks gambar yang ingin dibuat.
-        output_path (str | Path | None): Jalur folder atau nama file tujuan.
-        model (str): Model AI Google Flow yang dipilih (default: 'Nano Banana Pro').
-        aspect_ratio (str): Aspek rasio kanvas gambar (default: '16:9').
-        count (int | str): Kuantitas variasi gambar per generasi (default: 1).
-        email (str | None): Alamat email Google opsional untuk login otomatis mandiri.
-        password (str | None): Kata sandi Google opsional untuk login otomatis mandiri.
-        timeout (int): Batas waktu maksimal per percobaan dalam detik (default: 180).
-        max_retries (int | None): Batas percobaan maksimal (default: None, tanpa batas).
-        retry_delay (float): Waktu tunggu antar-percobaan dalam detik (default: 12.0).
-        auto_launch (bool): Luncurkan Firefox Portable headless otomatis jika belum aktif (default: True).
-        debug (bool): Simpan tangkapan layar debug visual (default: False).
-
-    Returns:
-        GenerationResult: Objek terstruktur berisi file_path, file_paths, prompt, model, aspect_ratio,
-                          count, attempt, dan duration_seconds.
-    """
-    start_ts = time.time()
-    generator = ImageGenerator(
+    with ImageClient(
         model=model,
         aspect_ratio=aspect_ratio,
         count=count,
         email=email,
         password=password,
-        debug=debug,
-    )
+    ) as temp_client:
+        return temp_client.batch(prompts, output_dir=output_dir, on_progress=progress_callback, **kwargs)
 
-    try:
-        generator.ensure_browser(auto_launch=auto_launch)
-        generator.connect()
-        generator.find_flow_tab()
-        generator.capture_debug_screenshot("01_canvas_ready", "Kondisi awal kanvas siap")
 
-        last_error = None
-        attempt = 1
-        while True:
-            if max_retries is not None and attempt > max_retries:
-                raise RuntimeError(
-                    f"Gagal membuat gambar setelah {max_retries} kali percobaan berturut-turut. Kesalahan terakhir: {last_error}"
-                )
+async def async_generate(
+    prompt: str,
+    *args: Any,
+    **kwargs: Any,
+) -> GenerationResult:
+    """Versi asynchronous non-blocking dari `generate()` untuk integrasi framework asyncio modern."""
+    return await asyncio.to_thread(generate, prompt, *args, **kwargs)
 
-            try:
-                # Bersihkan SELURUH tile di kanvas agar kanvas selalu kosong sebelum generasi baru
-                generator.delete_all_canvas_tiles()
 
-                # Segarkan halaman jika beberapa kali percobaan berturut-turut gagal
-                if attempt > 1 and attempt % 4 == 0:
-                    try:
-                        nav_url = getattr(generator, "current_project_url", None) or FLOW_HOME_URL
-                        generator.driver.navigate(nav_url)
-                        time.sleep(3.5)
-                        generator.find_flow_tab()
-                        generator.capture_debug_screenshot(
-                            f"page_refresh_att_{attempt}",
-                            f"Penyegaran halaman kanvas (Percobaan ke-{attempt})",
-                        )
-                    except Exception:
-                        pass
-
-                existing = set()
-                for d in generator.download_dirs:
-                    if d.exists():
-                        for f in list(d.glob("*.jpg")) + list(d.glob("*.jpeg")):
-                            existing.add(str(f.resolve()))
-
-                initial_state = generator.submit_prompt(prompt)
-                generator.capture_debug_screenshot(
-                    f"prompt_submitted_att_{attempt}",
-                    f"Prompt dikirim (Percobaan ke-{attempt})",
-                )
-
-                generator.hover_and_wait_tile(initial_state=initial_state, timeout=timeout)
-                generator.capture_debug_screenshot(
-                    f"render_success_att_{attempt}",
-                    f"Render selesai (Percobaan ke-{attempt})",
-                )
-
-                expected_num = 1
-                try:
-                    expected_num = int(str(generator.count_str).replace("x", "").strip())
-                except Exception:
-                    expected_num = 1
-
-                downloaded_files = generator.download_all_tiles(
-                    expected_count=expected_num,
-                    existing_files=existing,
-                    timeout=60,
-                )
-                generator.capture_debug_screenshot(
-                    f"download_completed_att_{attempt}",
-                    f"Unduhan {len(downloaded_files)} gambar selesai (Percobaan ke-{attempt})",
-                )
-
-                # Pemindahan seluruh berkas unduhan ke lokasi tujuan dengan penamaan resolusi standar
-                target_files: list[Path] = []
-                total_dl = len(downloaded_files)
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-
-                for idx, dl_file in enumerate(downloaded_files):
-                    dest_file = resolve_target_file_path(
-                        output_path=output_path,
-                        prompt=prompt,
-                        index=idx,
-                        total_count=total_dl,
-                        workspace_dir=generator.workspace_dir,
-                        timestamp=timestamp,
-                    )
-                    shutil.move(str(dl_file), str(dest_file))
-                    target_files.append(dest_file)
-
-                # Hapus SELURUH gambar dari kanvas peramban setelah berkas aman tersimpan
-                try:
-                    generator.delete_all_canvas_tiles()
-                    generator.capture_debug_screenshot("canvas_after_cleanup", "Pembersihan kanvas selesai")
-                except Exception as del_err:
-                    console.print(f"[warning]⚠ Catatan pembersihan: {del_err}[/warning]")
-
-                duration = time.time() - start_ts
-                primary_file = target_files[0] if target_files else (generator.workspace_dir / "outputs" / "unknown.jpg")
-                return GenerationResult(
-                    file_path=primary_file,
-                    file_paths=target_files,
-                    prompt=prompt,
-                    model=generator.model,
-                    aspect_ratio=generator.aspect_ratio,
-                    count=generator.count_str,
-                    attempt=attempt,
-                    duration_seconds=duration,
-                )
-
-            except (GenerationFailedError, TimeoutError) as attempt_err:
-                last_error = attempt_err
-                generator.capture_debug_screenshot(
-                    f"failure_state_att_{attempt}",
-                    f"Visual kegagalan (Percobaan ke-{attempt}): {attempt_err}",
-                )
-                generator.delete_all_canvas_tiles()
-                retry_tag = f"Percobaan ke-{attempt}" if max_retries is None else f"Percobaan {attempt}/{max_retries}"
-                console.print(
-                    f"[warning]⚠ {retry_tag} terdeteksi gagal ({attempt_err}). "
-                    f"Mengulang dari input prompt dalam {retry_delay:.0f} detik...[/warning]"
-                )
-                time.sleep(retry_delay)
-                attempt += 1
-
-    finally:
-        generator.close()
+async def async_generate_image(
+    prompt: str,
+    *args: Any,
+    **kwargs: Any,
+) -> Path | list[Path]:
+    """Versi asynchronous non-blocking dari `generate_image()` untuk integrasi framework asyncio modern."""
+    return await asyncio.to_thread(generate_image, prompt, *args, **kwargs)
 
 
 # ==============================================================================
