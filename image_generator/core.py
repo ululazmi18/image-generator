@@ -110,13 +110,15 @@ class ImageGenerator:
             self.profile_dir = Path(custom_profile).resolve()
         else:
             local_profile = self.workspace_dir / "browser_profile"
+            pkg_root = Path(__file__).resolve().parent.parent
             neighbor_profiles = [
                 local_profile,
+                pkg_root / "browser_profile",
                 self.workspace_dir / "firefox-stealth-automation" / "browser_profile",
                 self.workspace_dir.parent / "firefox-stealth-automation" / "browser_profile",
+                pkg_root / "firefox-stealth-automation" / "browser_profile",
                 self.workspace_dir.parent / "browser" / "browser_profile",
                 self.workspace_dir.parent / "browser_profile",
-                Path(r"D:\FirefoxPortable\Data\profile"),
             ]
             self.profile_dir = next((p for p in neighbor_profiles if p.exists()), local_profile)
 
@@ -125,16 +127,24 @@ class ImageGenerator:
         if custom_bin:
             self.ff_bin = Path(custom_bin).resolve()
         else:
-            default_ff = Path(r"D:\FirefoxPortable\App\Firefox64\firefox.exe")
+            pkg_root = Path(__file__).resolve().parent.parent
+            system_ff = shutil.which("firefox") or shutil.which("firefox.exe")
+            program_files = os.environ.get("PROGRAMFILES", r"C:\Program Files")
+            program_files_x86 = os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")
+            fallback_bin = pkg_root / "firefox_portable" / "App" / "Firefox64" / "firefox.exe"
             neighbor_bins = [
                 self.workspace_dir / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
+                pkg_root / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
                 self.workspace_dir / "firefox-stealth-automation" / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
                 self.workspace_dir.parent / "firefox-stealth-automation" / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
+                pkg_root / "firefox-stealth-automation" / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
                 self.workspace_dir.parent / "browser" / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
                 self.workspace_dir.parent / "firefox_portable" / "App" / "Firefox64" / "firefox.exe",
-                default_ff,
+                Path(system_ff) if system_ff else None,
+                Path(program_files) / "Mozilla Firefox" / "firefox.exe",
+                Path(program_files_x86) / "Mozilla Firefox" / "firefox.exe",
             ]
-            self.ff_bin = next((b for b in neighbor_bins if b.exists()), default_ff)
+            self.ff_bin = next((b for b in neighbor_bins if b and b.exists()), fallback_bin)
 
         self.download_dirs = self._detect_download_dirs()
         self.driver = MarionetteDriver()
@@ -184,17 +194,17 @@ class ImageGenerator:
         return self.download_dirs[0]
 
     def _detect_download_dirs(self) -> list[Path]:
-        """Mendeteksi semua direktori unduhan potensial peramban di Windows.
+        """Mendeteksi semua direktori unduhan potensial peramban di sistem.
 
-        Memeriksa folder Downloads pengguna Windows, D:\\Downloads, dan direktori lokal workspace.
+        Memeriksa folder Downloads pengguna dan direktori lokal workspace.
 
         Returns:
             list[Path]: Daftar direktori unduhan yang ada di sistem dan siap dipindai.
         """
         candidates = [
             Path.home() / "Downloads",
-            Path(r"D:\Downloads"),
             self.workspace_dir / "downloads",
+            self.workspace_dir / "outputs",
         ]
         dirs = [c for c in candidates if c.exists()]
         if not dirs:
@@ -482,11 +492,11 @@ class ImageGenerator:
             self.password = pwd_to_use
 
         # Temukan berkas login.py dari folder firefox-stealth-automation
+        pkg_root = Path(__file__).resolve().parent.parent
         login_script_candidates = [
             self.workspace_dir / "firefox-stealth-automation" / "login.py",
             self.workspace_dir.parent / "firefox-stealth-automation" / "login.py",
-            Path(r"D:\New folder\image-generator\firefox-stealth-automation\login.py"),
-            Path(r"D:\New folder\firefox-stealth-automation\login.py"),
+            pkg_root / "firefox-stealth-automation" / "login.py",
         ]
         login_script = next((p for p in login_script_candidates if p.exists()), None)
 
@@ -1876,8 +1886,8 @@ class ImageGenerator:
     def wait_for_downloaded_file(self, existing_files: set[str], timeout: int = 60) -> Path:
         """Memantau folder unduhan sampai berkas gambar .jpg baru selesai diunduh secara utuh.
 
-        Memindai seluruh direktori unduhan yang valid di sistem (Downloads pengguna Windows,
-        D:\\Downloads, dan direktori lokal workspace) untuk mendeteksi berkas baru,
+        Memindai seluruh direktori unduhan yang valid di sistem (Downloads pengguna
+        dan direktori lokal workspace) untuk mendeteksi berkas baru,
         memastikan berkas bukan bagian dari berkas lama (`existing_files`), tidak berekstensi `.part`,
         dan ukuran berkasnya stabil (> 0 bytes).
 
