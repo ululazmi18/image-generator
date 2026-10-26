@@ -68,76 +68,75 @@ irm https://raw.githubusercontent.com/ululazmi18/image-generator/main/install.ps
 
 ---
 
-## 🛠️ Panduan Instalasi Manual Langkah demi Langkah (Alternatif)
+## 🛠️ Panduan Instalasi & Integrasi Manual
 
-Jika Anda ingin menyiapkan lingkungan kerja secara bertahap secara manual:
-
-### Langkah 1: Kloning Repositori Image Generator & Pasang Dependensi
-Buka terminal PowerShell pada direktori kerja Anda (misal `C:\Users\...\Documents`), lalu kloning dan pasang dependensinya:
-```powershell
-# 1. Kloning repositori image-generator
-git clone https://github.com/ululazmi18/image-generator.git
-
-# 2. Masuk ke direktori image-generator
-cd image-generator
-
-# 3. Pasang dependensi pustaka Python
-pip install -r requirements.txt
-```
+`image-generator` dirancang terintegrasi erat dengan mesin peramban anti-deteksi bot **[firefox-stealth-automation](https://github.com/ululazmi18/firefox-stealth-automation)**. Anda dapat memilih salah satu dari dua metode integrasi berikut:
 
 ---
 
-### Langkah 2: Kloning & Siapkan Peramban Firefox Stealth
-Di dalam direktori `image-generator`, siapkan peramban mandiri anti-deteksi:
+### Metode 1: Integrasi Berdampingan (Side-by-Side — Direkomendasikan & Hemat Disk)
+Pada metode ini, kedua repositori ditempatkan berdampingan dalam satu folder kerja induk (*workspace*). `image-generator` akan **secara otomatis mendeteksi** biner Firefox Portable, profil sesi login, dan modul `firefox_stealth` dari folder tetangga tanpa perlu menyalin file biner bergiga-giga byte:
+
 ```powershell
-# 1. Pasang 7-Zip jika belum terpasang (agar ekstraksi berjalan 100% senyap otomatis)
-winget install 7zip.7zip
+# 1. Siapkan folder workspace dan masuk ke dalamnya
+mkdir my-workspace
+cd my-workspace
 
-# 2. Kloning repositori browser stealth di dalam folder proyek
+# 2. Kloning mesin peramban stealth & bootstrap browser
 git clone https://github.com/ululazmi18/firefox-stealth-automation.git
-
-# 3. Masuk ke direktori firefox-stealth-automation
 cd firefox-stealth-automation
-
-# 4. Pasang dependensi dan unduh Firefox Portable otomatis
 pip install -r requirements.txt
 python setup_browser.py
+python login.py                # Hubungkan akun Google sekali di sini
+cd ..
+
+# 3. Kloning image-generator & pasang dependensi
+git clone https://github.com/ululazmi18/image-generator.git
+cd image-generator
+pip install -r requirements.txt
+pip install -e .               # Daftarkan perintah CLI 'image-generator'
 ```
-*Skrip ini secara otomatis mengunduh Firefox Portable Edition resmi serta mengonfigurasi profil `browser_profile` yang telah di-hardening anti-deteksi bot.*
+*Struktur Direktori yang Terbentuk:*
+```text
+my-workspace/
+├── firefox-stealth-automation/    # Mesin peramban & sesi login (browser_profile/)
+└── image-generator/               # Aplikasi otomasi generasi gambar (otomatis mendeteksi tetangga)
+```
 
 ---
 
-### Langkah 3: Salin Folder Profil & Biner ke `image-generator`
-Kembali ke folder utama `image-generator`, lalu salin folder profil dan biner Firefox yang telah siap pakai:
+### Metode 2: Mode Mandiri Terisolasi (Standalone)
+Jika Anda ingin `image-generator` berdiri sendiri di satu folder terpisah tanpa folder eksternal:
+
 ```powershell
-# 1. Kembali ke direktori utama image-generator
+# 1. Kloning image-generator & pasang dependensi
+git clone https://github.com/ululazmi18/image-generator.git
+cd image-generator
+pip install -r requirements.txt
+pip install -e .
+
+# 2. Kloning & bootstrap peramban di subfolder sementara
+git clone https://github.com/ululazmi18/firefox-stealth-automation.git
+cd firefox-stealth-automation
+pip install -r requirements.txt
+python setup_browser.py
+python login.py                # Hubungkan akun Google
 cd ..
 
-# 2. Salin folder profil browser yang telah dikonfigurasi
+# 3. Salin folder profil & biner Firefox ke direktori utama image-generator
 Copy-Item -Path ".\firefox-stealth-automation\browser_profile" -Destination ".\" -Recurse -Force
-
-# 3. Salin folder biner Firefox Portable
 Copy-Item -Path ".\firefox-stealth-automation\firefox_portable" -Destination ".\" -Recurse -Force
+
+# 4. Hapus folder sementara jika ingin menghemat ruang penyimpanan
+Remove-Item -Path ".\firefox-stealth-automation" -Recurse -Force
 ```
 > **Proteksi Keamanan Akun:** Folder `browser_profile/` dan `firefox_portable/` sudah otomatis terdaftar di [`.gitignore`](.gitignore). Kredensial, cookies login, maupun file biner peramban tidak akan pernah terdorong (*pushed*) ke repositori publik GitHub.
 
-*(Tips: Setelah disalin, Anda dapat menghapus folder `firefox-stealth-automation` untuk menghemat ruang penyimpanan jika diinginkan).*
-
 ---
 
-### Langkah 4: Autentikasi Akun Google ke Google Flow
-Autentikasi akun Google dikelola secara mandiri oleh modul `firefox-stealth-automation`:
-```powershell
-python .\firefox-stealth-automation\login.py
-```
-1. Masukkan email dan kata sandi akun Google Anda langsung di terminal.
-2. Otomasi Full CLI berjalan di latar belakang, mendeteksi verifikasi 2FA jika diminta (cukup ketuk Ya / pilih angka di ponsel Anda), dan menyimpan token sesi ke `browser_profile/cookies.sqlite`.
-3. Setelah sesi terhubung, sistem langsung siap digunakan untuk membuat gambar.
+### Langkah Berikutnya: Menjalankan Image Generator (Siap Pakai!)
+Kini `image-generator` telah terhubung dengan peramban mandiri dan siap memproses prompt secara 100% senyap di latar belakang.
 
----
-
-### Langkah 5: Menjalankan Image Generator (Siap Pakai!)
-Kini `image-generator` telah memiliki peramban mandiri dan siap memproses prompt secara 100% senyap di latar belakang.
 
 Pilih salah satu metode eksekusi berikut:
 
