@@ -1518,8 +1518,32 @@ class ImageGenerator:
         else:
             self.driver.switch_to_window(flow_handle)
 
-        # 1. Tangani login jika diperlukan
-        self.handle_login_if_needed()
+        # 1. Periksa apakah sesi akun Google belum terhubung (berada di /about atau halaman login)
+        curr_url = ""
+        try:
+            curr_url = (self.driver.execute_script("return window.location.href;") or "").lower()
+        except Exception:
+            pass
+
+        if "/about" in curr_url or "accounts.google.com" in curr_url:
+            console.print(
+                Panel(
+                    "[bold yellow]Akun Google belum terhubung atau sesi login telah berakhir.[/bold yellow]\n\n"
+                    "Peramban dialihkan ke halaman publik Google Flow ([cyan]flow.google.com/about[/cyan])\n"
+                    "karena profil peramban belum memiliki sesi login Google yang aktif.\n\n"
+                    "[bold white]Solusi / Langkah Perbaikan:[/bold white]\n"
+                    "1. Buka folder [cyan]firefox-stealth-automation[/cyan]\n"
+                    "2. Jalankan perintah: [bold green]python login.py[/bold green]\n"
+                    "3. Masukkan email & sandi Google Flow Anda di terminal (100% aman & terisolasi di peramban lokal)\n"
+                    "4. Setelah sesi terverifikasi sukses, jalankan kembali [bold cyan]run.bat[/bold cyan] atau [bold cyan]image_generator.py[/bold cyan].",
+                    title="[gold]Sesi Google Flow Belum Aktif[/gold]",
+                    box=box.ROUNDED,
+                )
+            )
+            raise RuntimeError(
+                "Sesi akun Google belum terhubung atau telah berakhir di profil peramban. "
+                "Silakan jalankan 'python login.py' di folder firefox-stealth-automation terlebih dahulu."
+            )
 
         # 2. Tutup dialog modal onboarding jika muncul di beranda
         self.dismiss_onboarding_dialog()
@@ -1528,6 +1552,23 @@ class ImageGenerator:
         if not self.open_or_create_project(target_project_name="images generator"):
             console.print("[warning]⚠ Mencoba ulang membuka kanvas proyek Google Flow...[/warning]")
             if not self.open_or_create_project(target_project_name=""):
+                # Cek kembali apakah setelah dicoba ulang ternyata dialihkan ke /about
+                retry_url = ""
+                try:
+                    retry_url = (self.driver.execute_script("return window.location.href;") or "").lower()
+                except Exception:
+                    pass
+                if "/about" in retry_url or "accounts.google.com" in retry_url:
+                    console.print(
+                        Panel(
+                            "[bold yellow]Akun Google belum terhubung atau sesi login telah berakhir.[/bold yellow]\n\n"
+                            "Google Flow mengalihkan peramban ke halaman login publik.\n"
+                            "Silakan jalankan [bold green]python login.py[/bold green] di folder [cyan]firefox-stealth-automation[/cyan] untuk menghubungkan akun Google Anda.",
+                            title="[gold]Autentikasi Diperlukan[/gold]",
+                            box=box.ROUNDED,
+                        )
+                    )
+                    raise RuntimeError("Sesi akun Google belum terhubung. Silakan jalankan 'python login.py' di firefox-stealth-automation.")
                 raise RuntimeError("Gagal membuka atau membuat kanvas proyek Google Flow.")
 
         # 4. Tutup dialog modal onboarding jika muncul di kanvas proyek
