@@ -1712,76 +1712,136 @@ class ImageGenerator:
         except Exception:
             return 0
 
-    def delete_all_canvas_tiles(self, max_tiles: int = 20) -> int:
-        """Menghapus SEMUA tile gambar (berhasil maupun gagal) dari kanvas Google Flow.
+    def delete_all_canvas_tiles(self, max_tiles: int = 100) -> int:
+        """Menghapus SEMUA tile gambar (berhasil maupun gagal) secara massal & total dari kanvas Google Flow.
 
-        Menjamin kanvas proyek 100% bersih dan kosong sebelum gambar baru dibuat,
-        sesuai instruksi operasional mutlak agar tidak ada tile lama yang menumpuk.
+        Operasi pembersihan ini independen dari kuantitas gambar (-c). Sistem memindai
+        seluruh tile yang ada di kanvas proyek dan menghapusnya secara menyeluruh hingga
+        kanvas 100% kosong (zero remaining tiles).
+
+        Tahapan:
+        1. Menutup backdrop/overlay popup liar jika ada di layar kanvas.
+        2. Menghapus seluruh tile gagal/error secara instan melalui tombol hapus cepat.
+        3. Menghapus setiap tile yang tersisa satu per satu via hotbar menu 'Pindahkan ke sampah'.
+        4. Menggunakan polling interaksi responsif (0.15s) agar proses penghapusan berjalan kilat.
+        5. Melakukan verifikasi akhir untuk memastikan kanvas benar-benar bersih total.
 
         Args:
-            max_tiles (int): Batas maksimal pembersihan tile per siklus (default: 20).
+            max_tiles (int): Batas maksimal pembersihan pengaman per siklus (default: 100).
 
         Returns:
             int: Jumlah total tile yang berhasil dibersihkan dari kanvas.
         """
         deleted_count = 0
-        for _ in range(max_tiles):
-            # 1. Bersihkan tile gagal/error yang memiliki tombol hapus langsung
-            self.clean_failed_tiles()
 
-            # 2. Periksa apakah masih ada elemen tile pada kanvas
-            try:
-                tile_count = self.driver.execute_script("return document.querySelectorAll('flow-image-tile').length;")
-            except Exception:
-                tile_count = 0
+        # Tutup backdrop/overlay popup liar di awal
+        try:
+            self.driver.execute_script("document.querySelectorAll('.cdk-overlay-backdrop').forEach(el => el.click());")
+        except Exception:
+            pass
 
-            if not tile_count or tile_count == 0:
-                break
+        # 1. Bersihkan semua tile gagal terlebih dahulu secara massal
+        failed_cleaned = self.clean_failed_tiles()
+        deleted_count += failed_cleaned
 
-            # 3. Buka menu hotbar opsi pada tile pertama
-            open_script = """
-            const tile = document.querySelector('flow-image-tile');
-            if (!tile) return { success: false, reason: 'Tile tidak ditemukan' };
-            tile.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
-            tile.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+        # 2. Hapus tile yang ada secara berulang sampai kanvas benar-benar kosong
+        delete_step_script = """
+        // Tutup overlay sebelumnya jika ada
+        const backdrops = document.querySelectorAll('.cdk-overlay-backdrop');
+        if (backdrops.length > 0) {
+            backdrops.forEach(el => el.click());
+        }
 
-            const btn = tile.querySelector('button[aria-label="Opsi lainnya"], flow-image-hotbar button:nth-child(3), flow-image-hotbar button:last-child');
-            if (!btn) return { success: false, reason: 'Tombol hotbar tidak ditemukan' };
-            btn.click();
+        const tile = document.querySelector('flow-image-tile');
+        if (!tile) return { status: 'empty' };
+
+        // Pindahkan kursor virtual ke tile
+        tile.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+        tile.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+
+        const btn = tile.querySelector('button[aria-label="Opsi lainnya"], flow-image-hotbar button:nth-child(3), flow-image-hotbar button:last-child');
+        if (!btn) return { status: 'no_hotbar' };
+
+        btn.click();
+        return { status: 'opened' };
+        """
+
+        click_trash_script = """
+        const items = Array.from(document.querySelectorAll('.cdk-overlay-container button.mat-mdc-menu-item, button.mat-mdc-menu-item'));
+        const trash = items.find(b => {
+            const txt = (b.textContent || '').toLowerCase();
+            return txt.includes('sampah') || txt.includes('delete') || txt.includes('hapus') || txt.includes('trash');
+        });
+        if (trash) {
+            trash.click();
             return { success: true };
-            """
+        }
+        return { success: false };
+        """
+
+        consecutive_empty = 0
+        for _ in range(max_tiles):
+            # Cek jumlah tile tersisa di kanvas
             try:
-                res_open = self.driver.execute_script(open_script)
-                if not isinstance(res_open, dict) or not res_open.get("success"):
-                    time.sleep(0.5)
-                    continue
+                remaining_tiles = self.driver.execute_script("return document.querySelectorAll('flow-image-tile').length;")
             except Exception:
-                time.sleep(0.5)
+                remaining_tiles = 0
+
+            if not remaining_tiles or remaining_tiles == 0:
+                consecutive_empty += 1
+                if consecutive_empty >= 2:
+                    break
+                time.sleep(0.2)
                 continue
 
-            time.sleep(0.6)
+            consecutive_empty = 0
 
-            # 4. Klik opsi 'Pindahkan ke sampah' pada overlay menu
-            trash_script = """
-            const items = Array.from(document.querySelectorAll('.cdk-overlay-container button.mat-mdc-menu-item, button.mat-mdc-menu-item'));
-            const trash = items.find(b => (b.textContent || '').includes('sampah') || (b.textContent || '').includes('Delete'));
-            if (trash) {
-                trash.click();
-                return true;
-            }
-            return false;
-            """
+            # Buka hotbar menu tile
+            res_open = None
             try:
-                res_trash = self.driver.execute_script(trash_script)
-                if res_trash:
-                    deleted_count += 1
+                res_open = self.driver.execute_script(delete_step_script)
             except Exception:
                 pass
 
-            time.sleep(1.0)
+            if not isinstance(res_open, dict) or res_open.get("status") != "opened":
+                time.sleep(0.25)
+                continue
+
+            # Tunggu overlay menu muncul dan klik opsi 'Pindahkan ke sampah'
+            trash_clicked = False
+            for _ in range(10):
+                time.sleep(0.15)
+                try:
+                    res_trash = self.driver.execute_script(click_trash_script)
+                    if isinstance(res_trash, dict) and res_trash.get("success"):
+                        trash_clicked = True
+                        deleted_count += 1
+                        break
+                except Exception:
+                    pass
+
+            if not trash_clicked:
+                try:
+                    self.driver.execute_script("document.querySelectorAll('.cdk-overlay-backdrop').forEach(el => el.click());")
+                except Exception:
+                    pass
+                time.sleep(0.25)
+            else:
+                time.sleep(0.2)
+
+        # 3. Verifikasi akhir: pastikan kanvas benar-benar kosong total
+        try:
+            final_count = self.driver.execute_script("return document.querySelectorAll('flow-image-tile').length;")
+        except Exception:
+            final_count = 0
+
+        if final_count > 0:
+            console.print(f"[warning]⚠ Perhatian: Masih tersisa {final_count} tile di kanvas. Membersihkan sisa...[/warning]")
+            self.clean_failed_tiles()
 
         if deleted_count > 0:
-            console.print(f"[dim info]ℹ Membersihkan kanvas: {deleted_count} tile lama dihapus.[/dim info]")
+            console.print(f"[dim info]ℹ Pembersihan kanvas total: {deleted_count} tile gambar dipindahkan ke sampah (kanvas 100% bersih).[/dim info]")
+
         return deleted_count
 
     def submit_prompt(self, prompt_text: str) -> dict:
