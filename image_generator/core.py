@@ -196,17 +196,36 @@ class ImageGenerator:
     def _detect_download_dirs(self) -> list[Path]:
         """Mendeteksi semua direktori unduhan potensial peramban di sistem.
 
-        Memeriksa folder Downloads pengguna dan direktori lokal workspace.
+        Memeriksa folder kustom lingkungan (DOWNLOAD_DIR), folder Downloads pengguna,
+        dan direktori lokal workspace.
 
         Returns:
             list[Path]: Daftar direktori unduhan yang ada di sistem dan siap dipindai.
         """
-        candidates = [
+        custom_dl = os.environ.get("DOWNLOAD_DIR")
+        candidates: list[Path] = []
+        if custom_dl:
+            candidates.append(Path(custom_dl))
+        if os.name == "nt" and Path("D:/Downloads").exists():
+            candidates.append(Path("D:/Downloads"))
+        candidates.extend([
             Path.home() / "Downloads",
             self.workspace_dir / "downloads",
             self.workspace_dir / "outputs",
-        ]
-        dirs = [c for c in candidates if c.exists()]
+        ])
+
+        seen: set[Path] = set()
+        dirs: list[Path] = []
+        for c in candidates:
+            if c.exists():
+                try:
+                    resolved = c.resolve()
+                except OSError:
+                    resolved = c
+                if resolved not in seen:
+                    seen.add(resolved)
+                    dirs.append(c)
+
         if not dirs:
             default_dir = Path.home() / "Downloads"
             default_dir.mkdir(parents=True, exist_ok=True)
