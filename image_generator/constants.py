@@ -40,10 +40,12 @@ FLOW_HOME_URL = "https://flow.google.com/"
 AspectRatioType = Literal["16:9", "4:3", "1:1", "3:4", "9:16"]
 ModelType = Literal["Nano Banana Pro", "Nano Banana 2 Lite", "Nano Banana 2.1"]
 CountType = Literal[1, 2, 3, 4, "x1", "x2", "x3", "x4"]
+ResolutionType = Literal["2k", "1k"]
 
 DEFAULT_MODEL: str = "Nano Banana Pro"
 DEFAULT_ASPECT_RATIO: str = "16:9"
 DEFAULT_COUNT: int = 1
+DEFAULT_RESOLUTION: str = "2k"
 
 AVAILABLE_MODELS: list[str] = [
     "Nano Banana Pro",
@@ -57,6 +59,11 @@ AVAILABLE_ASPECT_RATIOS: list[str] = [
     "1:1",
     "3:4",
     "9:16",
+]
+
+AVAILABLE_RESOLUTIONS: list[str] = [
+    "2k",
+    "1k",
 ]
 
 AVAILABLE_COUNTS: list[int] = [1, 2, 3, 4]
@@ -130,6 +137,23 @@ COUNT_ALIASES: dict[str, str] = {
     "x4": "x4",
 }
 
+# Pemetaan alias resolusi ke format standar kanonikal ('2k' atau '1k')
+RESOLUTION_ALIASES: dict[str, str] = {
+    "2k": "2k",
+    "2": "2k",
+    "upscaled": "2k",
+    "ditingkatkan": "2k",
+    "resolusi ditingkatkan": "2k",
+    "high": "2k",
+    "hd": "2k",
+    "1k": "1k",
+    "1": "1k",
+    "original": "1k",
+    "asli": "1k",
+    "ukuran asli": "1k",
+    "standard": "1k",
+}
+
 
 def normalize_model(val: str | None) -> str:
     """Menormalkan input nama model AI ke format kanonikal resmi Google Flow.
@@ -192,6 +216,30 @@ def normalize_count(val: int | str | None) -> str:
     elif s in ("4", "x4"):
         return "x4"
     return f"x{DEFAULT_COUNT}"
+
+
+def normalize_resolution(val: str | None) -> str:
+    """Menormalkan input resolusi unduhan ke format kanonikal ('2k' atau '1k').
+
+    Google Flow menyediakan opsi resolusi:
+    - '2k': Opsi baris kedua ('2K - Resolusi ditingkatkan'), default standar.
+    - '1k': Opsi baris pertama ('1K - Ukuran asli').
+
+    Args:
+        val (str | None): Input resolusi (misal: '2k', '1k', 'original', 'upscaled').
+
+    Returns:
+        str: Resolusi kanonikal ('2k' atau '1k', default: '2k').
+    """
+    if not val:
+        return DEFAULT_RESOLUTION
+    clean = str(val).strip().lower()
+    if clean in RESOLUTION_ALIASES:
+        return RESOLUTION_ALIASES[clean]
+    for r in AVAILABLE_RESOLUTIONS:
+        if clean == r:
+            return r
+    return DEFAULT_RESOLUTION
 
 
 def resolve_target_file_path(

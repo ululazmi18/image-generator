@@ -20,10 +20,11 @@ Workspace `Image Generator` dirancang untuk otomasi generasi gambar berbasis per
 3. **Self-Healing Canvas Recovery:**
    - Deteksi otomatis kanvas kadaluarsa atau status 404 (`404?reason=project`) dan editor ProseMirror yang hilang.
    - Pemulihan mandiri dengan navigasi ke `FLOW_HOME_URL` untuk membuka proyek yang valid atau membuat proyek baru.
-4. **Multi-Model & Multi-Ratio Generator:**
+4. **Multi-Model, Multi-Ratio & Multi-Resolution Generator:**
    - Mendukung model AI: `pro` (Nano Banana Pro), `lite` (Nano Banana 2 Lite), `2.1` (Nano Banana 2.1).
    - Mendukung aspek rasio: `16:9`, `4:3`, `1:1`, `3:4`, `9:16`.
-   - Multi-tile unduhan otomatis (`-c 1..4`) dengan penamaan bertingkat (`-1, -2, -3, -4`) dalam resolusi 1K.
+   - Mendukung resolusi unduhan: `2k` (Default, resolusi ditingkatkan / upscaling otomatis) dan `1k` (ukuran asli tanpa jeda waktu upscaling).
+   - Multi-tile unduhan otomatis (`-c 1..4`) dengan penamaan bertingkat (`-1, -2, -3, -4`).
    - Pembersihan kanvas massal otomatis (*Pindahkan ke sampah*) setelah seluruh gambar berhasil disimpan.
 5. **Zero-Cursor Hijacking (100% Background Automation):**
    - Injeksi teks prompt via ProseMirror DOM (`document.execCommand` + `InputEvent`).
@@ -31,12 +32,12 @@ Workspace `Image Generator` dirancang untuk otomasi generasi gambar berbasis per
    - Dual-engine browser: Firefox Portable Stealth Edition dan fallback Chromium Playwright otomatis.
 
 ### 4. User Flow
-1. Pengguna menjalankan runner [run.bat](run.bat) atau CLI `python image_generator.py -p "prompt" [-a rasio] [-m model] [-c count] [--email email]`.
+1. Pengguna menjalankan runner [run.bat](run.bat) atau CLI `python image_generator.py -p "prompt" [-a rasio] [-m model] [-c count] [--res 2k|1k] [--email email]`.
 2. Skrip memeriksa sesi akun Google di `browser_profile/cookies.sqlite`:
    - Jika argumen `--email` diberikan dan berbeda dari akun aktif di browser, sistem secara otomatis menukar file `cookies.sqlite` dari Account Vault.
    - Jika akun belum ada di vault, skrip memicu autentikasi CLI headless untuk menyimpannya.
 3. Skrip memvalidasi kanvas Google Flow: jika proyek 404/rusak, otomatis dipulihkan ke proyek yang sehat dari beranda.
-4. Skrip mengisi prompt, menekan Generate, memantau hingga tile render selesai, mengunduh gambar resolusi 1K, dan membersihkan kanvas dari server.
+4. Skrip mengisi prompt, menekan Generate, memantau hingga tile render selesai, mengunduh gambar sesuai resolusi pilihan (default 2K upscaled atau 1K ukuran asli), dan membersihkan kanvas dari server.
 
 ### 5. Constraints & Guardrails
 - Profil peramban, biner portabel, dan seluruh token sesi akun TIDAK BOLEH dilacak oleh Git (dilindungi ketat oleh `.gitignore`).

@@ -6,12 +6,15 @@ from image_generator.constants import (
     AVAILABLE_ASPECT_RATIOS,
     AVAILABLE_COUNTS,
     AVAILABLE_MODELS,
+    AVAILABLE_RESOLUTIONS,
     DEFAULT_ASPECT_RATIO,
     DEFAULT_COUNT,
     DEFAULT_MODEL,
+    DEFAULT_RESOLUTION,
     normalize_aspect_ratio,
     normalize_count,
     normalize_model,
+    normalize_resolution,
 )
 
 
@@ -53,6 +56,27 @@ class TestConstantsAndNormalizers(unittest.TestCase):
         self.assertEqual(normalize_count(4), "x4")
         self.assertEqual(normalize_count(None), f"x{DEFAULT_COUNT}")
         self.assertEqual(normalize_count(99), f"x{DEFAULT_COUNT}")
+
+    def test_normalize_resolution(self) -> None:
+        # Default & 2k aliases
+        self.assertEqual(normalize_resolution("2k"), "2k")
+        self.assertEqual(normalize_resolution("2K"), "2k")
+        self.assertEqual(normalize_resolution("2"), "2k")
+        self.assertEqual(normalize_resolution("upscaled"), "2k")
+        self.assertEqual(normalize_resolution("ditingkatkan"), "2k")
+        self.assertEqual(normalize_resolution("high"), "2k")
+        self.assertEqual(normalize_resolution("hd"), "2k")
+        # 1k aliases
+        self.assertEqual(normalize_resolution("1k"), "1k")
+        self.assertEqual(normalize_resolution("1K"), "1k")
+        self.assertEqual(normalize_resolution("1"), "1k")
+        self.assertEqual(normalize_resolution("original"), "1k")
+        self.assertEqual(normalize_resolution("asli"), "1k")
+        self.assertEqual(normalize_resolution("standard"), "1k")
+        # None / invalid fallback -> DEFAULT_RESOLUTION ("2k")
+        self.assertEqual(normalize_resolution(None), DEFAULT_RESOLUTION)
+        self.assertEqual(normalize_resolution("invalid_res"), DEFAULT_RESOLUTION)
+        self.assertIn(DEFAULT_RESOLUTION, AVAILABLE_RESOLUTIONS)
 
     def test_ratio_icon_map(self) -> None:
         from image_generator.constants import RATIO_ICON_MAP

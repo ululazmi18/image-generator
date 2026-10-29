@@ -27,14 +27,17 @@ from image_generator.constants import (
     AVAILABLE_ASPECT_RATIOS,
     AVAILABLE_COUNTS,
     AVAILABLE_MODELS,
+    AVAILABLE_RESOLUTIONS,
     DEFAULT_ASPECT_RATIO,
     DEFAULT_COUNT,
     DEFAULT_MODEL,
+    DEFAULT_RESOLUTION,
     FLOW_HOME_URL,
     console,
     normalize_aspect_ratio,
     normalize_count,
     normalize_model,
+    normalize_resolution,
 )
 from image_generator.core import ImageGenerator
 from image_generator.exceptions import GenerationFailedError, QuotaExceededError
@@ -93,6 +96,12 @@ def show_help() -> None:
         "-c, -v, --var",
         "Int/Str [dim]('x1')[/dim]",
         "Jumlah variasi gambar: [green]1[/green], [green]2[/green], [green]3[/green], [green]4[/green] (atau [green]'x1'[/green] s/d [green]'x4'[/green]).",
+    )
+    opts_table.add_row(
+        "--resolution",
+        "--res, -r",
+        "Str [dim]('2k')[/dim]",
+        "Pilihan resolusi unduhan: [green]'2k'[/green] (Resolusi ditingkatkan, default) atau [yellow]'1k'[/yellow] (Ukuran asli).",
     )
     opts_table.add_row(
         "--output",
@@ -204,6 +213,32 @@ def show_help() -> None:
     )
     console.print(ratios_table)
 
+    # Tabel 4: Pilihan Resolusi Unduhan
+    res_table = Table(
+        title="[bold green]PILIHAN RESOLUSI UNDUHAN GAMBAR (DOWNLOAD RESOLUTION)[/bold green]",
+        box=box.ROUNDED,
+        header_style="bold green",
+        expand=True,
+    )
+    res_table.add_column("Resolusi", style="bold green", width=12)
+    res_table.add_column("Posisi Menu", style="cyan", width=16)
+    res_table.add_column("Alias Cepat", style="yellow", width=18)
+    res_table.add_column("Deskripsi & Karakteristik", style="white")
+
+    res_table.add_row(
+        "2K (Default)",
+        "Opsi Baris 2",
+        "2k, upscaled, high",
+        "Resolusi ditingkatkan dengan kejernihan maksimal dan detail tajam. Google Flow melakukan upscaling otomatis sebelum pengunduhan berkas.",
+    )
+    res_table.add_row(
+        "1K",
+        "Opsi Baris 1",
+        "1k, original, asli",
+        "Ukuran asli hasil render awal Google Flow. Proses unduhan berlangsung seketika tanpa jeda waktu upscaling.",
+    )
+    console.print(res_table)
+
     # Panel Contoh Penggunaan
     examples_text = (
         "[bold cyan]1. Mode Interaktif (Tanya-Jawab Ramah Pengguna):[/bold cyan]\n"
@@ -232,14 +267,15 @@ def show_help() -> None:
 # ==============================================================================
 # CLI PARSER & INTERFACE RUNNER
 # ==============================================================================
-def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool, str | None, str | None]:
-    """Mengekstrak parameter baris perintah (CLI) untuk prompt, setelan model, rasio, kuantitas, dan kredensial.
+def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool, str | None, str | None, str]:
+    """Mengekstrak parameter baris perintah (CLI) untuk prompt, setelan model, rasio, kuantitas, kredensial, dan resolusi.
 
     Mendukung opsi:
     - `--prompt` / `-p`: Teks deskripsi prompt.
     - `--model` / `-m`: Nama model AI ('pro', 'lite', '2.1' atau nama lengkap).
     - `--aspect-ratio` / `--ar` / `-a` / `--ratio`: Rasio gambar ('16:9', '4:3', '1:1', '3:4', '9:16', 'square', 'vertical').
     - `--count` / `-c` / `--variations` / `-v`: Kuantitas variasi (1, 2, 3, 4 atau 'x1', 'x2', dst).
+    - `--resolution` / `--res`: Resolusi unduhan ('2k' atau '1k', default: '2k').
     - `--output` / `-o` / `--dest` / `-d`: Folder atau nama berkas tujuan pemindahan.
     - `--timeout` / `-t`: Batas waktu maksimal per percobaan dalam detik (default: 180).
     - `--email` / `-e`: Alamat email Google Flow opsional untuk login otomatis mandiri.
@@ -248,7 +284,7 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool, str | N
     - `--help` / `-h` / `help`: Menampilkan panduan bantuan lengkap dan keluar.
 
     Returns:
-        tuple: (prompt, output_dest, model, aspect_ratio, count_str, timeout, debug_enabled, email, password)
+        tuple: (prompt, output_dest, model, aspect_ratio, count_str, timeout, debug_enabled, email, password, resolution)
     """
     args = sys.argv[1:]
 
@@ -259,11 +295,12 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool, str | N
 
     output_flags = ["--output", "-o", "--dest", "-d"]
     timeout_flags = ["--timeout", "-t"]
-    retries_flags = ["--retries", "-r"]
+    retries_flags = ["--retries"]
     prompt_flags = ["--prompt", "-p"]
     model_flags = ["--model", "-m"]
     ratio_flags = ["--aspect-ratio", "--ar", "-a", "--ratio"]
     count_flags = ["--count", "-c", "--variations", "-v", "--var"]
+    resolution_flags = ["--resolution", "--res"]
     email_flags = ["--email", "-e"]
     password_flags = ["--password", "--pass", "-pwd"]
     headless_flags = ["--headless"]
@@ -275,6 +312,7 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool, str | N
     model_val = DEFAULT_MODEL
     ratio_val = DEFAULT_ASPECT_RATIO
     count_val = DEFAULT_COUNT
+    resolution_val = DEFAULT_RESOLUTION
     email_val = None
     password_val = None
     prompt_tokens = []
@@ -302,6 +340,9 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool, str | N
         elif arg in count_flags and i + 1 < len(args):
             count_val = normalize_count(args[i + 1])
             i += 2
+        elif (arg in resolution_flags or (arg == "-r" and i + 1 < len(args) and args[i + 1].lower() in ["1k", "2k", "1", "2", "original", "upscaled"])) and i + 1 < len(args):
+            resolution_val = normalize_resolution(args[i + 1])
+            i += 2
         elif arg in email_flags and i + 1 < len(args):
             email_val = args[i + 1]
             i += 2
@@ -314,7 +355,7 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool, str | N
             except ValueError:
                 pass
             i += 2
-        elif arg in retries_flags and i + 1 < len(args):
+        elif (arg in retries_flags or arg == "-r") and i + 1 < len(args):
             i += 2
         elif arg in prompt_flags:
             i += 1
@@ -331,6 +372,9 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool, str | N
                 elif args[i] in count_flags:
                     count_val = normalize_count(args[i + 1]) if i + 1 < len(args) else count_val
                     i += 2
+                elif (args[i] in resolution_flags or (args[i] == "-r" and i + 1 < len(args) and args[i + 1].lower() in ["1k", "2k", "1", "2", "original", "upscaled"])) and i + 1 < len(args):
+                    resolution_val = normalize_resolution(args[i + 1])
+                    i += 2
                 elif args[i] in email_flags:
                     email_val = args[i + 1] if i + 1 < len(args) else None
                     i += 2
@@ -343,7 +387,7 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool, str | N
                     except (ValueError, IndexError):
                         pass
                     i += 2
-                elif args[i] in retries_flags:
+                elif args[i] in retries_flags or args[i] == "-r":
                     i += 2 if i + 1 < len(args) else 1
                 elif args[i] in debug_flags:
                     debug_val = True
@@ -357,7 +401,7 @@ def parse_cli_args() -> tuple[str, str | None, str, str, str, int, bool, str | N
             i += 1
 
     prompt_str = " ".join(prompt_tokens).strip()
-    return prompt_str, output_val, model_val, ratio_val, normalize_count(count_val), timeout_val, debug_val, email_val, password_val
+    return prompt_str, output_val, model_val, ratio_val, normalize_count(count_val), timeout_val, debug_val, email_val, password_val, resolution_val
 
 
 def main() -> int:
@@ -369,19 +413,19 @@ def main() -> int:
     )
     console.print(Panel(banner, box=box.ROUNDED, style="color(240)"))
 
-    prompt, output_dest, model, aspect_ratio, count_str, timeout, debug, email_arg, pwd_arg = parse_cli_args()
+    prompt, output_dest, model, aspect_ratio, count_str, timeout, debug, email_arg, pwd_arg, resolution = parse_cli_args()
 
     # Mode interaktif jika prompt belum diisi via CLI
     if not prompt:
         console.print(
             "[info]ℹ[/info] [dim]Tips CLI: Anda dapat memberikan argumen lengkap:\n"
-            "      run.bat --prompt \"pemandangan fajar\" --model pro --ar 9:16 --count 1[/dim]\n"
+            "      run.bat --prompt \"pemandangan fajar\" --model pro --ar 9:16 --count 1 --resolution 2k[/dim]\n"
         )
         prompt = Prompt.ask("[cyan]Masukkan Prompt Generasi Gambar[/cyan]")
 
         if prompt.strip():
             change_cfg = Prompt.ask(
-                f"[dim]Gunakan setelan default ([gold]🍌 {model}[/gold] | [magenta]{aspect_ratio}[/magenta] | [green]{count_str}[/green])? [Y/n][/dim]",
+                f"[dim]Gunakan setelan default ([gold]🍌 {model}[/gold] | [magenta]{aspect_ratio}[/magenta] | [green]{count_str}[/green] | [cyan]{resolution.upper()}[/cyan])? [Y/n][/dim]",
                 default="y",
             )
             if change_cfg.strip().lower() in ("n", "no", "tidak"):
@@ -396,6 +440,10 @@ def main() -> int:
                 c_in = Prompt.ask("[cyan]Pilih Kuantitas Variasi (1/2/3/4)[/cyan]", default="1")
                 count_str = normalize_count(c_in)
 
+                console.print(f"[dim]Pilihan Resolusi Unduhan: {', '.join(AVAILABLE_RESOLUTIONS).upper()} (Default 2K)[/dim]")
+                r_in = Prompt.ask("[cyan]Pilih Resolusi Unduhan (2k/1k)[/cyan]", default=resolution)
+                resolution = normalize_resolution(r_in)
+
     if not prompt.strip():
         console.print("[error]✗[/error] Prompt tidak boleh kosong.")
         return 1
@@ -409,6 +457,7 @@ def main() -> int:
     table.add_row("Model AI", f"[gold]🍌 {model}[/gold]")
     table.add_row("Aspek Rasio", f"[magenta]{aspect_ratio}[/magenta]")
     table.add_row("Kuantitas Gambar", f"[green]{count_str}[/green]")
+    table.add_row("Resolusi Unduhan", f"[bold cyan]{resolution.upper()}[/bold cyan] [dim]({'Resolusi ditingkatkan' if resolution == '2k' else 'Ukuran asli'})[/dim]")
     table.add_row("Metode Eksekusi", "[bold green]100% Silent Background (Zero Cursor Hijacking)[/bold green]")
     table.add_row("Mode Tampilan", "[bold yellow]100% Native Headless (Tanpa GUI)[/bold yellow]")
     table.add_row("Auto-Retry Penanganan", "[bold green]Tanpa Batas (Loop sampai ada hasil)[/bold green]")
@@ -431,6 +480,7 @@ def main() -> int:
         model=model,
         aspect_ratio=aspect_ratio,
         count=count_str,
+        resolution=resolution,
         email=email_arg,
         password=pwd_arg,
         debug=debug,
@@ -530,16 +580,17 @@ def main() -> int:
 
                     progress.update(
                         task,
-                        description=f"[cyan]Memicu unduhan 1K ({expected_num} gambar)...[/cyan]",
+                        description=f"[cyan]Memicu unduhan {generator.resolution.upper()} ({expected_num} gambar)...[/cyan]",
                     )
                     downloaded_files = generator.download_all_tiles(
                         expected_count=expected_num,
+                        resolution=generator.resolution,
                         existing_files=existing,
                         progress_callback=lambda cur, tot: progress.update(
                             task,
-                            description=f"[cyan]Mengunduh gambar {cur}/{tot} resolusi 1K...[/cyan]",
+                            description=f"[cyan]Mengunduh gambar {cur}/{tot} resolusi {generator.resolution.upper()}...[/cyan]",
                         ),
-                        timeout=60,
+                        timeout=90,
                     )
                     generator.capture_debug_screenshot(
                         f"download_completed_att_{attempt}",
@@ -648,13 +699,15 @@ def main() -> int:
     summary_table.add_row("Model AI Terpilih", f"[bold gold]🍌 {generator.model}[/bold gold]")
     summary_table.add_row("Aspek Rasio Terpasang", f"[bold magenta]{generator.aspect_ratio}[/bold magenta]")
     summary_table.add_row("Kuantitas Gambar", f"[bold green]{generator.count_str}[/bold green]")
+    res_pos_desc = "Opsi Baris 2 - Resolusi ditingkatkan" if generator.resolution == "2k" else "Opsi Baris 1 - Ukuran asli"
+    summary_table.add_row("Resolusi Unduhan", f"[bold cyan]{generator.resolution.upper()}[/bold cyan] [dim]({res_pos_desc})[/dim]")
     summary_table.add_row("Interupsi Kursor Pengguna", "[bold green]✓ 0% (Kursor Bebas Digunakan)[/bold green]")
     summary_table.add_row("Mode Tampilan Jendela", "[bold green]✓ 100% Native Headless (Tanpa GUI)[/bold green]")
     summary_table.add_row("Auto-Retry Penanganan Gagal", f"[bold green]✓ Berhasil pada Percobaan ke-{successful_attempt} (Tanpa Batas)[/bold green]")
     summary_table.add_row("Total Durasi", f"[bold cyan]{total_duration:.1f} detik[/bold cyan]")
     if debug:
         summary_table.add_row("Dokumentasi Visual Debug", f"[bold magenta]{generator.debug_dir} (Tersimpan format .png)[/bold magenta]")
-    summary_table.add_row("Hotbar & Download 1K", f"[bold green]✓ Berhasil Diunduh ({len(target_files)} gambar resolusi 1K)[/bold green]")
+    summary_table.add_row(f"Hotbar & Download {generator.resolution.upper()}", f"[bold green]✓ Berhasil Diunduh ({len(target_files)} gambar resolusi {generator.resolution.upper()})[/bold green]")
     summary_table.add_row("Pembersihan Kanvas", "[bold green]✓ Seluruh Tile Dipindahkan ke Sampah[/bold green]")
 
     if len(target_files) == 1:
@@ -685,7 +738,8 @@ def main() -> int:
             f"[muted]Prompt:[/muted] [gold]{prompt}[/gold]\n"
             f"{acc_banner_part}[muted]Model:[/muted] [gold]🍌 {generator.model}[/gold]  |  "
             f"[muted]Rasio:[/muted] [magenta]{generator.aspect_ratio}[/magenta]  |  "
-            f"[muted]Variasi:[/muted] [green]{generator.count_str}[/green]\n"
+            f"[muted]Variasi:[/muted] [green]{generator.count_str}[/green]  |  "
+            f"[muted]Resolusi:[/muted] [cyan]{generator.resolution.upper()}[/cyan]\n"
             f"{file_banner_lines}"
             f"[muted]Percobaan:[/muted] [green]Berhasil pada percobaan ke-{successful_attempt} ({total_duration:.1f}s)[/green]\n"
             f"[muted]Kursor Mouse:[/muted] [green]Tidak tersentuh sama sekali selama proses berlangsung[/green]"

@@ -13,9 +13,11 @@ from image_generator.constants import (
     DEFAULT_ASPECT_RATIO,
     DEFAULT_COUNT,
     DEFAULT_MODEL,
+    DEFAULT_RESOLUTION,
     normalize_aspect_ratio,
     normalize_count,
     normalize_model,
+    normalize_resolution,
 )
 from image_generator.core import ImageGenerator
 from image_generator.models import (
@@ -24,6 +26,7 @@ from image_generator.models import (
     GenerationConfig,
     GenerationResult,
     Model,
+    Resolution,
 )
 
 
@@ -35,7 +38,7 @@ class ImageClient:
     Dapat digunakan langsung atau sebagai context manager (`with ImageClient() as client:`).
 
     Contoh Penggunaan:
-        >>> with ImageClient(model="pro", aspect_ratio="16:9") as client:
+        >>> with ImageClient(model="pro", aspect_ratio="16:9", resolution="2k") as client:
         ...     res1 = client.generate("mobil balap futuristik di tokyo fajar")
         ...     res2 = client.generate("mobil balap klasik di pedesaan inggris")
         ...     print(f"Hasil 1: {res1.image_path}")
@@ -48,6 +51,7 @@ class ImageClient:
         model: str | Model = DEFAULT_MODEL,
         aspect_ratio: str | AspectRatio = DEFAULT_ASPECT_RATIO,
         count: int | Count | str = DEFAULT_COUNT,
+        resolution: str | Resolution = DEFAULT_RESOLUTION,
         email: str | None = None,
         password: str | None = None,
         auto_launch: bool = True,
@@ -57,6 +61,7 @@ class ImageClient:
         self.default_model = model.value if isinstance(model, Model) else model
         self.default_aspect_ratio = aspect_ratio.value if isinstance(aspect_ratio, AspectRatio) else aspect_ratio
         self.default_count = count.value if isinstance(count, Count) else count
+        self.default_resolution = resolution.value if isinstance(resolution, Resolution) else resolution
         self.email = email
         self.password = password
         self.auto_launch = auto_launch
@@ -75,14 +80,17 @@ class ImageClient:
         model: str | Model | None = None,
         aspect_ratio: str | AspectRatio | None = None,
         count: int | Count | str | None = None,
+        resolution: str | Resolution | None = None,
     ) -> ImageGenerator:
         req_model = model.value if isinstance(model, Model) else model
         req_ratio = aspect_ratio.value if isinstance(aspect_ratio, AspectRatio) else aspect_ratio
         req_count = count.value if isinstance(count, Count) else count
+        req_res = resolution.value if isinstance(resolution, Resolution) else resolution
 
         target_model = normalize_model(req_model or self.default_model)
         target_ratio = normalize_aspect_ratio(req_ratio or self.default_aspect_ratio)
         target_count = normalize_count(req_count if req_count is not None else self.default_count)
+        target_res = normalize_resolution(req_res or self.default_resolution)
 
         if self._generator is None:
             self._generator = ImageGenerator(
@@ -90,6 +98,7 @@ class ImageClient:
                 model=target_model,
                 aspect_ratio=target_ratio,
                 count=target_count,
+                resolution=target_res,
                 email=self.email,
                 password=self.password,
                 debug=self.debug,
@@ -102,6 +111,7 @@ class ImageClient:
             self._generator.model = target_model
             self._generator.aspect_ratio = target_ratio
             self._generator.count_str = target_count
+            self._generator.resolution = target_res
 
         return self._generator
 
@@ -112,6 +122,7 @@ class ImageClient:
         model: str | Model | None = None,
         aspect_ratio: str | AspectRatio | None = None,
         count: int | Count | str | None = None,
+        resolution: str | Resolution | None = None,
         timeout: int = 180,
         max_retries: int | None = None,
         retry_delay: float = 12.0,
@@ -123,18 +134,20 @@ class ImageClient:
             model = model or config.model
             aspect_ratio = aspect_ratio or config.aspect_ratio
             count = count if count is not None else config.count
+            resolution = resolution or config.resolution
             output_path = output_path or config.output_path
             timeout = timeout if timeout != 180 else config.timeout
             max_retries = max_retries if max_retries is not None else config.max_retries
             retry_delay = retry_delay if retry_delay != 12.0 else config.retry_delay
 
-        gen = self._ensure_generator(model=model, aspect_ratio=aspect_ratio, count=count)
+        gen = self._ensure_generator(model=model, aspect_ratio=aspect_ratio, count=count, resolution=resolution)
         return gen.generate_flow(
             prompt=prompt,
             output_path=output_path,
             timeout=timeout,
             max_retries=max_retries,
             retry_delay=retry_delay,
+            resolution=resolution.value if isinstance(resolution, Resolution) else resolution,
         )
 
     def generate_image(
@@ -231,6 +244,7 @@ def generate(
     model: str | Model = DEFAULT_MODEL,
     aspect_ratio: str | AspectRatio = DEFAULT_ASPECT_RATIO,
     count: int | Count | str = DEFAULT_COUNT,
+    resolution: str | Resolution = DEFAULT_RESOLUTION,
     email: str | None = None,
     password: str | None = None,
     timeout: int = 180,
@@ -246,7 +260,7 @@ def generate(
 
     Mendukung berbagai gaya pemanggilan:
     1. Standar: `generate("prompt")`
-    2. Enums: `generate("prompt", model=Model.PRO, aspect_ratio=AspectRatio.SQUARE_1_1)`
+    2. Enums: `generate("prompt", model=Model.PRO, aspect_ratio=AspectRatio.SQUARE_1_1, resolution=Resolution.TWO_K)`
     3. Konfigurasi: `generate("prompt", config=cfg)`
     4. Sesi Reusable: `generate("prompt", client=client)`
 
@@ -256,6 +270,7 @@ def generate(
         model (str | Model): Model AI Google Flow (default: 'pro' / 'Nano Banana Pro').
         aspect_ratio (str | AspectRatio): Aspek rasio kanvas gambar (default: '16:9').
         count (int | Count | str): Kuantitas variasi gambar per generasi (default: 1).
+        resolution (str | Resolution): Resolusi unduhan gambar ('2k' atau '1k', default: '2k').
         email (str | None): Alamat email Google opsional untuk login otomatis mandiri.
         password (str | None): Kata sandi Google opsional untuk login otomatis mandiri.
         timeout (int): Batas waktu maksimal per percobaan dalam detik (default: 180).
@@ -273,6 +288,7 @@ def generate(
         model = config.model
         aspect_ratio = config.aspect_ratio
         count = count if count != DEFAULT_COUNT else config.count
+        resolution = resolution if resolution != DEFAULT_RESOLUTION else config.resolution
         output_path = output_path or config.output_path
         timeout = timeout if timeout != 180 else config.timeout
         max_retries = max_retries if max_retries is not None else config.max_retries
@@ -289,6 +305,7 @@ def generate(
             model=model,
             aspect_ratio=aspect_ratio,
             count=count,
+            resolution=resolution,
             timeout=timeout,
             max_retries=max_retries,
             retry_delay=retry_delay,
@@ -299,6 +316,7 @@ def generate(
         model=model,
         aspect_ratio=aspect_ratio,
         count=count,
+        resolution=resolution,
         email=email,
         password=password,
         auto_launch=auto_launch,
@@ -320,6 +338,7 @@ def generate_image(
     model: str | Model = DEFAULT_MODEL,
     aspect_ratio: str | AspectRatio = DEFAULT_ASPECT_RATIO,
     count: int | Count | str = DEFAULT_COUNT,
+    resolution: str | Resolution = DEFAULT_RESOLUTION,
     email: str | None = None,
     password: str | None = None,
     timeout: int = 180,
@@ -338,6 +357,7 @@ def generate_image(
         model=model,
         aspect_ratio=aspect_ratio,
         count=count,
+        resolution=resolution,
         email=email,
         password=password,
         timeout=timeout,
@@ -360,6 +380,7 @@ def generate_batch(
     model: str | Model = DEFAULT_MODEL,
     aspect_ratio: str | AspectRatio = DEFAULT_ASPECT_RATIO,
     count: int | Count | str = DEFAULT_COUNT,
+    resolution: str | Resolution = DEFAULT_RESOLUTION,
     email: str | None = None,
     password: str | None = None,
     client: ImageClient | None = None,
@@ -374,6 +395,7 @@ def generate_batch(
         model=model,
         aspect_ratio=aspect_ratio,
         count=count,
+        resolution=resolution,
         email=email,
         password=password,
     ) as temp_client:

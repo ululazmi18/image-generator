@@ -24,12 +24,14 @@ from image_generator.constants import (
     DEFAULT_ASPECT_RATIO,
     DEFAULT_COUNT,
     DEFAULT_MODEL,
+    DEFAULT_RESOLUTION,
     FLOW_HOME_URL,
     RATIO_ICON_MAP,
     console,
     normalize_aspect_ratio,
     normalize_count,
     normalize_model,
+    normalize_resolution,
 )
 from image_generator.exceptions import GenerationFailedError, QuotaExceededError
 from image_generator.models import GenerationResult, resolve_target_file_path
@@ -72,6 +74,7 @@ class ImageGenerator:
         model: str = DEFAULT_MODEL,
         aspect_ratio: str = DEFAULT_ASPECT_RATIO,
         count: int | str = DEFAULT_COUNT,
+        resolution: str = DEFAULT_RESOLUTION,
         email: str | None = None,
         password: str | None = None,
         debug: bool = False,
@@ -84,6 +87,7 @@ class ImageGenerator:
             model (str): Nama rangkaian model AI (default: 'Nano Banana Pro').
             aspect_ratio (str): Aspek rasio gambar ('16:9', '4:3', '1:1', '3:4', '9:16').
             count (int | str): Kuantitas variasi gambar per generasi (1, 2, 3, 4 atau 'x1', 'x2', dst).
+            resolution (str): Resolusi unduhan gambar ('2k' atau '1k', default: '2k').
             email (str | None): Alamat email Google opsional untuk login otomatis.
             password (str | None): Kata sandi Google opsional untuk login otomatis.
             debug (bool): Mengaktifkan mode debug dengan dokumentasi tangkapan layar visual (default: False).
@@ -101,6 +105,7 @@ class ImageGenerator:
         self.model = normalize_model(model)
         self.aspect_ratio = normalize_aspect_ratio(aspect_ratio)
         self.count_str = normalize_count(count)
+        self.resolution = normalize_resolution(resolution)
         self.email = email
         self.password = password
 
@@ -1774,24 +1779,32 @@ class ImageGenerator:
 
         raise TimeoutError(f"Waktu tunggu generasi gambar habis ({timeout} detik). Gambar belum selesai dirender.")
 
-    def click_hotbar_and_download(self, tile_index: int = 0, timeout: int = 20) -> bool:
-        """Membuka menu opsi hotbar (tombol 3), mengeklik 'Download', dan memilih resolusi '1K (Ukuran asli)'.
+    def click_hotbar_and_download(
+        self,
+        tile_index: int = 0,
+        resolution: str | None = None,
+        timeout: int = 20,
+    ) -> bool:
+        """Membuka menu opsi hotbar (tombol 3), mengeklik 'Download', dan memilih resolusi ('2k' atau '1k').
 
         Navigasi dilakukan secara senyap melalui Angular CDK overlay event tanpa memerlukan kursor mouse fisik:
         1. Mengirimkan event hover (`mouseenter`/`mouseover`) ke tile dengan index yang ditentukan dan mengeklik tombol hotbar 3.
         2. Mengeklik item menu 'Download' pada popup menu overlay.
-        3. Mengeklik submenu resolusi '1K (Ukuran asli)' untuk memulai pengunduhan berkas ke disk.
+        3. Mengeklik submenu resolusi ('2k' Resolusi ditingkatkan atau '1k' Ukuran asli) untuk memulai pengunduhan berkas ke disk.
 
         Args:
             tile_index (int): Indeks tile yang akan diunduh (default: 0 untuk tile pertama).
+            resolution (str | None): Resolusi target ('2k' atau '1k', default: None menggunakan self.resolution).
             timeout (int): Batas waktu maksimal interaksi menu dalam detik (default: 20).
 
         Returns:
-            bool: True jika opsi unduhan resolusi 1K berhasil diklik.
+            bool: True jika opsi unduhan resolusi berhasil diklik.
 
         Raises:
-            RuntimeError: Jika elemen hotbar, menu Download, atau opsi 1K tidak ditemukan.
+            RuntimeError: Jika elemen hotbar, menu Download, atau opsi resolusi target tidak ditemukan.
         """
+        target_res = normalize_resolution(resolution or getattr(self, "resolution", DEFAULT_RESOLUTION))
+
         # 1. Buka menu hotbar button 3 secara senyap pada tile index tertentu
         open_hotbar_script = """
         const tileIndex = arguments[0];
@@ -1830,42 +1843,74 @@ class ImageGenerator:
 
         time.sleep(1.0)
 
-        # 3. Klik opsi '1K (Ukuran asli)' di submenu overlay
-        click_1k_script = """
+        # 3. Klik opsi resolusi ('2k' atau '1k') di submenu overlay
+        click_res_script = """
+        const targetRes = arguments[0];
         const buttons = Array.from(document.querySelectorAll('.cdk-overlay-container button.mat-mdc-menu-item, button.mat-mdc-menu-item'));
-        const oneK = buttons.find(b => (b.textContent || '').includes('1K') || (b.textContent || '').includes('Ukuran asli') || (b.textContent || '').includes('Original'));
-        if (!oneK) return { success: false, error: 'Opsi 1K tidak ditemukan.' };
 
-        oneK.click();
-        return { success: true, text: oneK.textContent.trim() };
+        let targetBtn = null;
+        if (targetRes === '2k') {
+            targetBtn = buttons.find(b => {
+                const text = (b.textContent || '').toLowerCase();
+                return text.includes('2k') || text.includes('ditingkatkan') || text.includes('resolusi ditingkatkan') || text.includes('upscaled');
+            });
+        } else {
+            targetBtn = buttons.find(b => {
+                const text = (b.textContent || '').toLowerCase();
+                return text.includes('1k') || text.includes('ukuran asli') || text.includes('original');
+            });
+        }
+
+        // Fallback berdasarkan posisi urutan tombol aktif di submenu jika pencocokan teks gagal
+        if (!targetBtn) {
+            const activeSubmenuButtons = buttons.filter(b => {
+                const isSubmenuItem = b.closest('flow-menu-item') || b.querySelector('.item-text');
+                const isDisabled = b.disabled || b.getAttribute('aria-disabled') === 'true';
+                return isSubmenuItem && !isDisabled;
+            });
+            if (targetRes === '2k' && activeSubmenuButtons.length >= 2) {
+                targetBtn = activeSubmenuButtons[1]; // Baris kedua: 2K (Resolusi ditingkatkan)
+            } else if (activeSubmenuButtons.length >= 1) {
+                targetBtn = activeSubmenuButtons[0]; // Baris pertama: 1K (Ukuran asli)
+            }
+        }
+
+        if (!targetBtn) return { success: false, error: `Opsi resolusi ${targetRes.toUpperCase()} tidak ditemukan pada submenu.` };
+
+        targetBtn.click();
+        return { success: true, text: targetBtn.textContent.trim(), resolution: targetRes };
         """
-        res_1k = self.driver.execute_script(click_1k_script)
-        if not isinstance(res_1k, dict) or not res_1k.get("success"):
-            raise RuntimeError(f"Gagal mengeklik opsi resolusi 1K pada tile ke-{tile_index}: {res_1k}")
+        res_res = self.driver.execute_script(click_res_script, [target_res])
+        if not isinstance(res_res, dict) or not res_res.get("success"):
+            raise RuntimeError(f"Gagal mengeklik opsi resolusi {target_res.upper()} pada tile ke-{tile_index}: {res_res}")
 
         return True
 
     def download_all_tiles(
         self,
         expected_count: int = 1,
+        resolution: str | None = None,
         existing_files: set[str] | None = None,
         progress_callback: any = None,
-        timeout: int = 60,
+        timeout: int = 90,
     ) -> list[Path]:
-        """Memicu unduhan resolusi 1K untuk seluruh tile gambar hasil generasi di kanvas secara berurutan.
+        """Memicu unduhan resolusi terpilih (default 2K atau 1K) untuk seluruh tile gambar hasil generasi di kanvas secara berurutan.
 
         Mendukung pengunduhan 1 hingga 4 gambar sekaligus sesuai jumlah variasi (-c 1 s/d -c 4).
         Memastikan setiap berkas unduhan benar-benar stabil dan selesai sebelum memicu unduhan berikutnya.
 
         Args:
             expected_count (int): Jumlah target gambar yang diharapkan (1-4).
+            resolution (str | None): Resolusi unduhan target ('2k' atau '1k', default: None menggunakan self.resolution).
             existing_files (set[str] | None): Berkas gambar yang sudah ada sebelum pengunduhan.
             progress_callback (callable | None): Callback laporan status unduhan per-gambar.
-            timeout (int): Batas waktu maksimal unduhan per gambar dalam detik (default: 60).
+            timeout (int): Batas waktu maksimal unduhan per gambar dalam detik (default: 90).
 
         Returns:
             list[Path]: Daftar path berkas unduhan gambar baru (.jpg) yang berhasil diunduh.
         """
+        target_res = normalize_resolution(resolution or getattr(self, "resolution", DEFAULT_RESOLUTION))
+
         if existing_files is None:
             existing_files = set()
             for d in self.download_dirs:
@@ -1891,8 +1936,8 @@ class ImageGenerator:
             if progress_callback:
                 progress_callback(idx + 1, target_downloads)
 
-            # 1. Pemicu unduhan 1K pada tile ke-idx
-            self.click_hotbar_and_download(tile_index=idx)
+            # 1. Pemicu unduhan resolusi target pada tile ke-idx
+            self.click_hotbar_and_download(tile_index=idx, resolution=target_res)
 
             # 2. Tunggu berkas unduhan selesai
             dl_file = self.wait_for_downloaded_file(existing_files=current_existing, timeout=timeout)
@@ -1966,6 +2011,7 @@ class ImageGenerator:
         timeout: int = 180,
         max_retries: int | None = None,
         retry_delay: float = 12.0,
+        resolution: str | None = None,
         start_ts: float | None = None,
     ) -> GenerationResult:
         """Mengeksekusi satu siklus penuh pembuatan gambar pada sesi kanvas peramban aktif.
@@ -1976,6 +2022,7 @@ class ImageGenerator:
             timeout (int): Batas waktu maksimal proses render per percobaan (detik).
             max_retries (int | None): Batas percobaan maksimal jika terjadi kegagalan render.
             retry_delay (float): Jeda waktu antar-percobaan render (detik).
+            resolution (str | None): Resolusi unduhan ('2k' atau '1k', default: None menggunakan self.resolution).
             start_ts (float | None): Waktu mulai eksekusi untuk pencatatan durasi.
 
         Returns:
@@ -1984,6 +2031,7 @@ class ImageGenerator:
         if start_ts is None:
             start_ts = time.time()
 
+        target_res = normalize_resolution(resolution or getattr(self, "resolution", DEFAULT_RESOLUTION))
         last_error = None
         attempt = 1
         while True:
@@ -2036,8 +2084,9 @@ class ImageGenerator:
 
                 downloaded_files = self.download_all_tiles(
                     expected_count=expected_num,
+                    resolution=target_res,
                     existing_files=existing,
-                    timeout=60,
+                    timeout=90,
                 )
                 self.capture_debug_screenshot(
                     f"download_completed_att_{attempt}",
@@ -2077,6 +2126,7 @@ class ImageGenerator:
                     model=self.model,
                     aspect_ratio=self.aspect_ratio,
                     count=self.count_str,
+                    resolution=target_res,
                     attempt=attempt,
                     duration_seconds=duration,
                     success=True,

@@ -105,3 +105,13 @@
   - [x] Perbaruan komprehensif `README.md` pada kedua repositori
   - [x] Pembaruan memori proyek (`task.md`, `PRD.md`, `memory.db`)
   - [x] Verifikasi sintaksis dan kebersihan working tree sebelum push
+
+- [x] Opsi Resolusi Unduhan Gambar (2K Default & 1K Asli)
+  - [x] Analisis antarmuka native browser Google Flow untuk memastikan posisi menu dan submenu Download (1K ukuran asli di baris 1, 2K upscaled di baris 2, 4K berbayar di baris 3)
+  - [x] Verifikasi interaksi 2K native browser membuktikan pemicuan upscaling otomatis dan unduhan berkas gambar beresolusi tinggi
+  - [x] Tambahkan konstanta `DEFAULT_RESOLUTION = "2k"`, `AVAILABLE_RESOLUTIONS`, alias resolusi, dan fungsi `normalize_resolution()`
+  - [x] Tambahkan enum `Resolution` dan integrasikan field `resolution` pada `GenerationConfig` dan `GenerationResult`
+  - [x] Perbarui selector dan logika `click_hotbar_and_download()` di `ImageGenerator` untuk mendukung pemilihan 2K atau 1K serta penyesuaian timeout upscaling 90s
+  - [x] Integrasikan parameter resolusi ke modul klien Python (`ImageClient`, `generate`, `generate_image`, `generate_batch`)
+  - [x] Tambahkan flag CLI `--resolution`, `--res`, dan `-r` serta tabel panduan resolusi Rich terminal pada `image_generator/cli.py`
+  - [x] Perbarui root shim `image_generator.py` dan suite pengujian unit (13 pengujian 100% passed)

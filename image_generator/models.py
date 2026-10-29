@@ -16,9 +16,11 @@ from image_generator.constants import (
     DEFAULT_ASPECT_RATIO,
     DEFAULT_COUNT,
     DEFAULT_MODEL,
+    DEFAULT_RESOLUTION,
     normalize_aspect_ratio,
     normalize_count,
     normalize_model,
+    normalize_resolution,
 )
 
 
@@ -56,6 +58,18 @@ class Count(int, Enum):
     FOUR = 4
 
 
+class Resolution(str, Enum):
+    """Pilihan resolusi unduhan gambar Google Flow."""
+
+    TWO_K = "2k"
+    ONE_K = "1k"
+    # Alias umum
+    UPSCALED = "2k"
+    HIGH = "2k"
+    ORIGINAL = "1k"
+    ASLI = "1k"
+
+
 @dataclass
 class GenerationConfig:
     """Objek konfigurasi pembuatan gambar untuk integrasi modul Python tingkat enterprise."""
@@ -63,6 +77,7 @@ class GenerationConfig:
     model: str | Model = DEFAULT_MODEL
     aspect_ratio: str | AspectRatio = DEFAULT_ASPECT_RATIO
     count: int | Count | str = DEFAULT_COUNT
+    resolution: str | Resolution = DEFAULT_RESOLUTION
     output_path: str | Path | None = None
     timeout: int = 180
     max_retries: int | None = None
@@ -72,15 +87,17 @@ class GenerationConfig:
     auto_launch: bool = True
     debug: bool = False
 
-    def normalized(self) -> tuple[str, str, str]:
-        """Mengembalikan tuple ternormalisasi (model_resmi, aspek_rasio, string_kuantitas)."""
+    def normalized(self) -> tuple[str, str, str, str]:
+        """Mengembalikan tuple ternormalisasi (model_resmi, aspek_rasio, string_kuantitas, resolusi)."""
         m = self.model.value if isinstance(self.model, Model) else self.model
         a = self.aspect_ratio.value if isinstance(self.aspect_ratio, AspectRatio) else self.aspect_ratio
         c = self.count.value if isinstance(self.count, Count) else self.count
+        r = self.resolution.value if isinstance(self.resolution, Resolution) else self.resolution
         return (
             normalize_model(m),
             normalize_aspect_ratio(a),
             normalize_count(c),
+            normalize_resolution(r),
         )
 
 
@@ -93,8 +110,9 @@ class GenerationResult:
     model: str
     aspect_ratio: str
     count: str
-    attempt: int
-    duration_seconds: float
+    resolution: str = DEFAULT_RESOLUTION
+    attempt: int = 1
+    duration_seconds: float = 0.0
     file_paths: list[Path] = field(default_factory=list)
     success: bool = True
     error_message: str | None = None
@@ -168,6 +186,7 @@ class GenerationResult:
             "model": self.model,
             "aspect_ratio": self.aspect_ratio,
             "count": self.count,
+            "resolution": self.resolution,
             "attempt": self.attempt,
             "duration_seconds": self.duration_seconds,
             "error_message": self.error_message,

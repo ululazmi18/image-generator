@@ -1,6 +1,6 @@
 ---
 trigger: model_decision
-description: Aktif saat mengorganisir, membuat folder baru, menata berkas, memindahkan file, atau mengelola struktur direktori di root workspace proyek aktif.
+description: Aktif saat membuat, menata, memindahkan folder, mengelola direktori root workspace, menjaga kebersihan root (zero clutter), atau memisahkan modul domain fungsional mandiri.
 ---
 
 # STANDARISASI ARSITEKTUR & TATA KELOLA DIREKTORI WORKSPACE PROYEK
@@ -37,6 +37,7 @@ Pedoman ini mengatur tata kelola penataan berkas, struktur direktori, pemisahan 
 - **`studio/`:** Domain eksperimen media dan laboratorium multimedia generatif (jika workspace memuat modul media).
 - **`docs/`:** Dokumentasi arsitektur, panduan teknis, dan spesifikasi sistem.
 - **`scripts/` atau `tools/`:** Skrip otomasi atau utilitas operasional yang terisolasi.
+- **`outputs/`:** Direktori penampung luaran artefak (gambar, video, laporan olahan) yang diabaikan oleh `.gitignore`.
 
 ---
 
@@ -49,18 +50,12 @@ Jika pengguna meminta membuat domain, modul, atau fungsionalitas baru di root wo
 2. **Kelengkapan Standar:**
    - Sediakan `README.md` lokal yang menjelaskan fungsi dan struktur folder tersebut.
    - Sediakan file `.gitignore` lokal jika folder menghasilkan artefak build, cache, atau data sensitif `.env`.
-   - Siapkan subfolder terorganisir (misal: `src/` untuk kode, `outputs/` untuk hasil).
+   - Siapkan subfolder terorganisir (misal: `src/` untuk kode, `outputs/` untuk hasil luaran).
 3. **Pembaruan Peta Workspace:**
    - Perbarui `README.md` pada root workspace proyek untuk mencatat modul baru tersebut pada bagan topologi direktori.
 
 ---
 
-## 4. Standarisasi Bahasa & Kode
-- **Identifikator Teknis:** Nama folder, berkas skrip, fungsi, dan variabel **wajib Bahasa Inggris** (contoh: `outputs`, `videos`, `main.py`).
-- **Dokumentasi & Komentar:** Panduan `README.md`, catatan implementasi, dan komentar kode **wajib Bahasa Indonesia** yang profesional dan lugas.
-
----
-
-## 5. Kebersihan Direktori (Hygiene)
+## 4. Kebersihan Direktori & Sanitasi Cache (Hygiene)
 - Seluruh berkas temporer, log debugging, dan cache pengujian wajib dibersihkan atau diabaikan oleh `.gitignore`.
 - Jangan memindahkan atau menghapus berkas yang sudah ada tanpa memastikan seluruh data berharga telah dicadangkan.

@@ -11,6 +11,7 @@ from image_generator.models import (
     GenerationConfig,
     GenerationResult,
     Model,
+    Resolution,
     resolve_target_file_path,
 )
 
@@ -24,6 +25,8 @@ class TestModelsAndSchemas(unittest.TestCase):
         self.assertEqual(AspectRatio.WIDE, "16:9")
         self.assertEqual(Count.ONE, 1)
         self.assertEqual(Count.FOUR, 4)
+        self.assertEqual(Resolution.TWO_K, "2k")
+        self.assertEqual(Resolution.ONE_K, "1k")
 
     def test_generation_config(self) -> None:
         cfg = GenerationConfig(count=2, debug=True)
@@ -31,10 +34,17 @@ class TestModelsAndSchemas(unittest.TestCase):
         self.assertTrue(cfg.debug)
         self.assertEqual(cfg.model, "Nano Banana Pro")
         self.assertEqual(cfg.aspect_ratio, "16:9")
-        norm_m, norm_a, norm_c = cfg.normalized()
+        self.assertEqual(cfg.resolution, "2k")
+        norm_m, norm_a, norm_c, norm_r = cfg.normalized()
         self.assertEqual(norm_m, "Nano Banana Pro")
         self.assertEqual(norm_a, "16:9")
         self.assertEqual(norm_c, "x2")
+        self.assertEqual(norm_r, "2k")
+
+        # Custom 1k resolution
+        cfg_1k = GenerationConfig(resolution="1k")
+        self.assertEqual(cfg_1k.resolution, "1k")
+        self.assertEqual(cfg_1k.normalized()[3], "1k")
 
     def test_generation_result_to_dict_and_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -49,6 +59,7 @@ class TestModelsAndSchemas(unittest.TestCase):
                 model="Nano Banana Pro",
                 aspect_ratio="16:9",
                 count=1,
+                resolution="2k",
                 attempt=1,
                 duration_seconds=12.5,
             )
@@ -56,14 +67,17 @@ class TestModelsAndSchemas(unittest.TestCase):
             self.assertTrue(res)
             self.assertEqual(len(res), 1)
             self.assertEqual(res[0], file1)
+            self.assertEqual(res.resolution, "2k")
 
             res_dict = res.to_dict()
             self.assertEqual(res_dict["success"], True)
             self.assertEqual(res_dict["prompt"], "Test prompt")
+            self.assertEqual(res_dict["resolution"], "2k")
 
             json_str = res.to_json()
             parsed = json.loads(json_str)
             self.assertEqual(parsed["model"], "Nano Banana Pro")
+            self.assertEqual(parsed["resolution"], "2k")
 
     def test_resolve_target_file_path_single(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

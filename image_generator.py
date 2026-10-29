@@ -30,16 +30,20 @@ from image_generator.constants import (
     AVAILABLE_ASPECT_RATIOS,
     AVAILABLE_COUNTS,
     AVAILABLE_MODELS,
+    AVAILABLE_RESOLUTIONS,
     COUNT_ALIASES,
     DEFAULT_ASPECT_RATIO,
     DEFAULT_COUNT,
     DEFAULT_MODEL,
+    DEFAULT_RESOLUTION,
     FLOW_HOME_URL,
     MODEL_ALIASES,
     RATIO_ICON_MAP,
+    RESOLUTION_ALIASES,
     normalize_aspect_ratio,
     normalize_count,
     normalize_model,
+    normalize_resolution,
 )
 
 from image_generator.core import ImageGenerator
@@ -56,6 +60,7 @@ from image_generator.models import (
     GenerationConfig,
     GenerationResult,
     Model,
+    Resolution,
     resolve_target_file_path,
 )
 
