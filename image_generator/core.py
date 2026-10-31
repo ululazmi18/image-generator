@@ -694,7 +694,13 @@ class ImageGenerator:
             if was_running:
                 self.close()
 
+            # Bersihkan file WAL & SHM lama agar SQLite tidak membaca log kadaluwarsa
+            (self.profile_dir / "cookies.sqlite-wal").unlink(missing_ok=True)
+            (self.profile_dir / "cookies.sqlite-shm").unlink(missing_ok=True)
+
             shutil.copy2(src_cookie, dest_cookie)
+            (self.profile_dir / "cookies.sqlite-wal").unlink(missing_ok=True)
+            (self.profile_dir / "cookies.sqlite-shm").unlink(missing_ok=True)
             self.email = email
             return True
         except Exception:
