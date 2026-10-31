@@ -539,7 +539,11 @@ class ImageGenerator:
             sys.path.insert(0, str(login_dir))
 
         try:
-            from login import automated_google_login
+            try:
+                from firefox_stealth.auth import automated_google_login
+            except ImportError:
+                from login import automated_google_login
+
             success = automated_google_login(
                 email=email_to_use,
                 password=pwd_to_use,
