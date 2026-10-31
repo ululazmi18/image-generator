@@ -52,6 +52,7 @@ from image_generator.exceptions import (
     CanvasNavigationError,
     GenerationFailedError,
     ImageGeneratorError,
+    PolicyViolationError,
     QuotaExceededError,
 )
 from image_generator.models import (

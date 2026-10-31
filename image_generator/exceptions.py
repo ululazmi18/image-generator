@@ -31,6 +31,23 @@ class QuotaExceededError(GenerationFailedError):
     pass
 
 
+class PolicyViolationError(GenerationFailedError):
+    """Pengecualian yang dilemparkan saat prompt melanggar kebijakan konten / keselamatan Google Flow."""
+
+    def __init__(self, message: str, prompt: Optional[str] = None, details: Optional[Any] = None) -> None:
+        super().__init__(message, details)
+        self.prompt = prompt
+
+    def __str__(self) -> str:
+        base = f"Pelanggaran Kebijakan Google Flow: {self.message}"
+        if self.prompt:
+            base += f" (Prompt: '{self.prompt}')"
+        if self.details:
+            base += f" [Rincian: {self.details}]"
+        return base
+
+
+
 class CanvasNavigationError(ImageGeneratorError):
     """Pengecualian yang dilemparkan saat tab Google Flow atau proyek tidak dapat diakses (404/expired)."""
     pass

@@ -44,6 +44,7 @@ from image_generator.exceptions import (
     CanvasNavigationError,
     GenerationFailedError,
     ImageGeneratorError,
+    PolicyViolationError,
     QuotaExceededError,
 )
 from image_generator.models import (
@@ -93,6 +94,7 @@ __all__ = [
     "ImageGeneratorError",
     "GenerationFailedError",
     "QuotaExceededError",
+    "PolicyViolationError",
     "CanvasNavigationError",
     "BrowserNotFoundError",
     # Core Controller

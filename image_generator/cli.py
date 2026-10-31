@@ -40,7 +40,11 @@ from image_generator.constants import (
     normalize_resolution,
 )
 from image_generator.core import ImageGenerator
-from image_generator.exceptions import GenerationFailedError, QuotaExceededError
+from image_generator.exceptions import (
+    GenerationFailedError,
+    PolicyViolationError,
+    QuotaExceededError,
+)
 from image_generator.models import resolve_target_file_path
 
 
@@ -415,6 +419,8 @@ def main() -> int:
 
     prompt, output_dest, model, aspect_ratio, count_str, timeout, debug, email_arg, pwd_arg, resolution = parse_cli_args()
 
+    is_interactive = not bool(prompt)
+
     # Mode interaktif jika prompt belum diisi via CLI
     if not prompt:
         console.print(
@@ -566,6 +572,7 @@ def main() -> int:
                             task,
                             description=f"[gold]Menunggu render gambar selesai ({p}% - Percobaan ke-{attempt})...[/gold]",
                         ),
+                        prompt=prompt,
                     )
                     generator.capture_debug_screenshot(
                         f"render_success_att_{attempt}",
@@ -624,6 +631,51 @@ def main() -> int:
                     success = True
                     successful_attempt = attempt
                     break
+
+                except PolicyViolationError as policy_err:
+                    generator.capture_debug_screenshot(
+                        f"policy_violation_att_{attempt}",
+                        f"Kebijakan Google Flow dilanggar: {policy_err}",
+                    )
+                    generator.delete_all_canvas_tiles()
+                    violating_prompt = getattr(policy_err, "prompt", None) or prompt
+
+                    console.print(
+                        Panel(
+                            f"[bold red]Prompt Ditolak oleh Filter Kebijakan & Keamanan Google Flow![/bold red]\n\n"
+                            f"[bold cyan]• Prompt Bermasalah :[/bold cyan] [bold yellow]\"{violating_prompt}\"[/bold yellow]\n"
+                            f"[bold red]• Pesan Google Flow :[/bold red] [white]{policy_err.message}[/white]\n\n"
+                            f"[bold white]Penyebab & Analisis:[/bold white]\n"
+                            f"• Google Flow mendeteksi teks prompt melanggar pedoman kebijakan keamanan (Safety Guidelines),\n"
+                            f"  atau mengandung kata repetitif acak (gibberish/spamming) yang memicu filter perlindungan sistem.\n"
+                            f"• Sistem otomatis menghentikan loop percobaan (fast-fail) agar tidak membuang waktu & kredit kuota Anda.\n\n"
+                            f"[bold green]Petunjuk & Rekomendasi Solusi:[/bold green]\n"
+                            f"  1. [cyan]Hindari kata berulang atau tidak bermakna[/cyan] (seperti 'ba ba ba ba na na').\n"
+                            f"  2. [cyan]Gunakan deskripsi visual kontekstual & spesifik[/cyan] (contoh: 'buah pisang segar di atas meja kayu').\n"
+                            f"  3. [cyan]Hindari kata kunci sensitif, kekerasan, tokoh publik, atau merek dagang berhak cipta.[/cyan]",
+                            title="[bold red]Kebijakan Konten Google Flow Dilanggar (Safety Policy)[/bold red]",
+                            box=box.ROUNDED,
+                        )
+                    )
+
+                    if is_interactive:
+                        console.print()
+                        retry_new = Prompt.ask(
+                            "[bold cyan]Apakah Anda ingin memasukkan prompt perbaikan baru sekarang?[/bold cyan] [Y/n]",
+                            default="y",
+                        )
+                        if retry_new.strip().lower() not in ("n", "no", "tidak"):
+                            new_prompt = Prompt.ask("[cyan]Masukkan Prompt Baru[/cyan]")
+                            if new_prompt.strip():
+                                prompt = new_prompt.strip()
+                                attempt = 1
+                                progress.update(
+                                    task,
+                                    description=f"[cyan]Mengirim prompt baru: {prompt}...[/cyan]",
+                                )
+                                continue
+
+                    return 1
 
                 except QuotaExceededError as quota_err:
                     generator.capture_debug_screenshot(

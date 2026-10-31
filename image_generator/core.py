@@ -33,7 +33,11 @@ from image_generator.constants import (
     normalize_model,
     normalize_resolution,
 )
-from image_generator.exceptions import GenerationFailedError, QuotaExceededError
+from image_generator.exceptions import (
+    GenerationFailedError,
+    PolicyViolationError,
+    QuotaExceededError,
+)
 from image_generator.models import GenerationResult, resolve_target_file_path
 
 # Sinkronisasi & Integrasi dengan Modul firefox-stealth-automation
@@ -1399,11 +1403,12 @@ class ImageGenerator:
         let deleted = 0;
         for (const t of tiles) {
             const txt = (t.innerText || '').toLowerCase();
-            if (txt.includes('gagal') || txt.includes('failed') || txt.includes('coba lagi') || txt.includes('batas penggunaan') || txt.includes('error') || txt.includes('tidak dapat membuat')) {
+            if (txt.includes('gagal') || txt.includes('failed') || txt.includes('coba lagi') || txt.includes('batas penggunaan') || txt.includes('error') || txt.includes('tidak dapat membuat') || txt.includes('kebijakan') || txt.includes('melanggar') || txt.includes('policy')) {
                 const delBtn = Array.from(t.querySelectorAll('button')).find(b => {
                     const bTxt = (b.innerText || '').toLowerCase();
                     const bAria = (b.getAttribute('aria-label') || '').toLowerCase();
-                    return bTxt.includes('delete') || bAria.includes('delete') || bTxt.includes('hapus') || bAria.includes('hapus');
+                    const mat = b.querySelector('mat-icon') ? b.querySelector('mat-icon').innerText.toLowerCase() : '';
+                    return bTxt.includes('delete') || bAria.includes('delete') || bTxt.includes('hapus') || bAria.includes('hapus') || mat.includes('delete');
                 });
                 if (delBtn) {
                     delBtn.click();
@@ -1572,6 +1577,8 @@ class ImageGenerator:
         Raises:
             RuntimeError: Jika elemen editor prompt atau tombol submit tidak ditemukan.
         """
+        self.last_submitted_prompt = prompt_text
+
         # Tutup menu overlay liar jika ada
         try:
             self.driver.execute_script("document.querySelectorAll('.cdk-overlay-backdrop').forEach(el => el.click());")
@@ -1685,6 +1692,7 @@ class ImageGenerator:
         initial_state: dict | None = None,
         timeout: int = 180,
         progress_callback: any = None,
+        prompt: str | None = None,
     ) -> bool:
         """Memantau progres generasi gambar (0% -> 100%) dan menunggu render tile baru selesai.
 
@@ -1698,11 +1706,14 @@ class ImageGenerator:
             timeout (int): Batas waktu maksimal menunggu proses render dalam detik (default: 180).
             progress_callback (callable | None): Fungsi callback yang menerima string persentase
                                                  (misal: `lambda pct: print(f"{pct}%")`).
+            prompt (str | None): Teks prompt yang sedang diproses untuk pelaporan galat kontekstual.
 
         Returns:
             bool: True jika gambar selesai dirender dan hotbar menu opsi siap diakses.
 
         Raises:
+            PolicyViolationError: Jika prompt melanggar kebijakan konten / keselamatan Google Flow.
+            QuotaExceededError: Jika batas penggunaan kuota tercapai.
             GenerationFailedError: Jika peramban Google Flow menampilkan tile galat/gagal.
             TimeoutError: Jika waktu tunggu habis sebelum gambar selesai dirender.
         """
@@ -1733,12 +1744,13 @@ class ImageGenerator:
         let failedMsg = null;
         for (const t of tiles) {
             const txt = (t.innerText || '').toLowerCase();
-            if (txt.includes('gagal') || txt.includes('failed') || txt.includes('batas penggunaan') || txt.includes('coba lagi') || txt.includes('error') || txt.includes('tidak dapat membuat')) {
+            if (txt.includes('gagal') || txt.includes('failed') || txt.includes('batas penggunaan') || txt.includes('coba lagi') || txt.includes('error') || txt.includes('tidak dapat membuat') || txt.includes('kebijakan') || txt.includes('melanggar') || txt.includes('policy')) {
                 failedMsg = t.innerText.replace(/\\n/g, ' -- ');
                 const delBtn = Array.from(t.querySelectorAll('button')).find(b => {
                     const bTxt = (b.innerText || '').toLowerCase();
                     const bAria = (b.getAttribute('aria-label') || '').toLowerCase();
-                    return bTxt.includes('delete') || bAria.includes('delete') || bTxt.includes('hapus') || bAria.includes('hapus');
+                    const mat = b.querySelector('mat-icon') ? b.querySelector('mat-icon').innerText.toLowerCase() : '';
+                    return bTxt.includes('delete') || bAria.includes('delete') || bTxt.includes('hapus') || bAria.includes('hapus') || mat.includes('delete');
                 });
                 if (delBtn) {
                     delBtn.click();
@@ -1780,8 +1792,15 @@ class ImageGenerator:
                     self.capture_debug_screenshot("tile_render_failed", f"Tile gagal terdeteksi: {failed_msg}")
                     time.sleep(1.0)
                     failed_lower = failed_msg.lower()
-                    if any(k in failed_lower for k in ["batas penggunaan", "quota", "rate limit", "coba lagi nanti", "usage limit"]):
+                    if any(k in failed_lower for k in ["batas penggunaan", "quota", "rate limit", "coba lagi nanti", "usage limit", "limit reached"]):
                         raise QuotaExceededError(failed_msg)
+                    if any(k in failed_lower for k in [
+                        "melanggar kebijakan", "kebijakan kami", "coba perintah lain",
+                        "tidak perlu menggunakan kredit", "policy violation", "violat",
+                        "safety guideline", "safety filter", "harmful", "blocked by safety"
+                    ]):
+                        active_p = prompt or getattr(self, "last_submitted_prompt", None)
+                        raise PolicyViolationError(failed_msg, prompt=active_p)
                     raise GenerationFailedError(failed_msg)
 
                 current_prog = st.get("progress")
@@ -2182,6 +2201,20 @@ class ImageGenerator:
                     success=True,
                 )
 
+            except PolicyViolationError as p_err:
+                self.capture_debug_screenshot(
+                    f"policy_violation_att_{attempt}",
+                    f"Kebijakan Google Flow dilanggar: {p_err}",
+                )
+                self.delete_all_canvas_tiles()
+                raise
+            except QuotaExceededError as q_err:
+                self.capture_debug_screenshot(
+                    f"quota_exceeded_att_{attempt}",
+                    f"Batas penggunaan kuota tercapai: {q_err}",
+                )
+                self.delete_all_canvas_tiles()
+                raise
             except (GenerationFailedError, TimeoutError) as attempt_err:
                 last_error = attempt_err
                 self.capture_debug_screenshot(
