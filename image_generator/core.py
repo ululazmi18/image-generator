@@ -961,8 +961,8 @@ class ImageGenerator:
             const aria = (b.getAttribute('aria-label') || '').toLowerCase();
             const isDismissAction = t === 'berikutnya' || t === 'next' || t === 'lanjutkan' ||
                                     t === 'continue' || t === 'saya setuju' || t === 'setuju' ||
-                                    t === 'mulai' || t === 'selesai' || t === 'i agree' ||
-                                    t.includes('berikutnya') || t.includes('lanjutkan') || t.includes('setuju');
+                                    t === 'mulai' || t === 'selesai' || t === 'i agree' || t === 'oke' ||
+                                    t.includes('berikutnya') || t.includes('lanjutkan') || t.includes('setuju') || t.includes('oke');
             const isNegative = t === 'logout' || t === 'batal' || t === 'cancel' || t === 'sebelumnya';
             return isDismissAction && !isNegative && !b.disabled && b.getAttribute('aria-disabled') !== 'true';
         });
@@ -973,7 +973,18 @@ class ImageGenerator:
             return { hasDialog: true, action: 'clicked', button: btnText };
         }
 
-        return { hasDialog: true, action: 'waiting_scroll_or_enabled' };
+        // 2. Cek tooltip pengumuman fitur baru (seperti "Gemini Omni Flash" atau "Agen Anda aktif")
+        const featureBtn = Array.from(document.querySelectorAll('button')).find(b => {
+            const txt = (b.innerText || '').trim().toLowerCase();
+            return txt === 'oke' || txt === 'got it' || txt === 'mengerti' || txt.includes('oke');
+        });
+        if (featureBtn && featureBtn.offsetParent !== null) {
+            const btnText = featureBtn.innerText.trim();
+            featureBtn.click();
+            return { hasDialog: true, action: 'clicked_feature', button: btnText };
+        }
+
+        return { hasDialog: false };
         """
 
         closed_any = False
@@ -987,10 +998,10 @@ class ImageGenerator:
                     btn_clicked = res.get("button", "Aksi")
                     console.print(f"[info]ℹ[/info] Menutup modal onboarding Google Flow (Tahap {cycle}: mengeklik '{btn_clicked}')...")
                     self.capture_debug_screenshot(f"dismiss_onboarding_step_{cycle}", f"Dismiss onboarding dialog tahap {cycle}")
-                    time.sleep(2.0)
+                    time.sleep(1.5)
             except Exception:
                 pass
-            time.sleep(0.5)
+            time.sleep(0.3)
 
         return closed_any
 
@@ -1005,7 +1016,15 @@ class ImageGenerator:
             bool: True jika panel berhasil ditutup atau sudah dalam kondisi tertutup.
         """
         close_script = """
-        const closeBtn = document.querySelector('button[aria-label="Tutup"], button[aria-label*="Tutup sesi"], .page-layout header button.mdc-icon-button:last-child');
+        // Prioritaskan tombol close header pada panel sesi (abaikan tombol Tutup di snackbar / toast alert)
+        const closeBtn = Array.from(document.querySelectorAll('button')).find(b => {
+            const isToast = !!b.closest('.mat-mdc-snack-bar-container, [role="alert"]');
+            if (isToast) return false;
+            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+            const txt = (b.innerText || '').trim().toLowerCase();
+            const icon = b.querySelector('mat-icon') ? b.querySelector('mat-icon').innerText.trim().toLowerCase() : '';
+            return b.classList.contains('header-action') || aria === 'tutup' || aria.includes('tutup sesi') || aria.includes('close') || icon === 'close' || txt === 'close';
+        });
         if (closeBtn && closeBtn.offsetParent !== null) {
             closeBtn.click();
             return { closed: true };
@@ -1623,9 +1642,13 @@ class ImageGenerator:
         # 3. Klik tombol submit (yang kini diaktifkan disabled: false oleh Angular)
         btn_id = None
         for sel in (
-            "flow-prompt-box button.generate-icon-button",
+            "flow-generate-icon-button button",
             "button[aria-label='Mulai pembuatan']",
+            "button[aria-label*='pembuatan']",
+            "button[aria-label*='generate' i]",
+            "flow-prompt-box button.generate-icon-button",
             "flow-prompt-box button[type='submit']",
+            "flow-prompt-box button",
         ):
             try:
                 btn_id = self.driver.find_element("css selector", sel)
@@ -1634,14 +1657,26 @@ class ImageGenerator:
             except Exception:
                 pass
 
+        click_fallback_js = """
+        const b = Array.from(document.querySelectorAll('button')).find(el => {
+            const icon = el.querySelector('mat-icon') ? el.querySelector('mat-icon').innerText.trim() : '';
+            const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+            return icon === 'arrow_forward' || icon === 'send' || aria.includes('pembuatan') || aria.includes('generate');
+        });
+        if (b && !b.disabled) {
+            b.click();
+            return true;
+        }
+        return false;
+        """
+
         if btn_id:
             try:
                 self.driver.click_element(btn_id)
             except Exception:
-                self.driver.execute_script("const b = document.querySelector('button[aria-label=\"Mulai pembuatan\"], button.generate-icon-button'); if (b) b.click();")
+                self.driver.execute_script(click_fallback_js)
         else:
-            # Fallback DOM click
-            self.driver.execute_script("const b = document.querySelector('button[aria-label=\"Mulai pembuatan\"], button.generate-icon-button'); if (b) b.click();")
+            self.driver.execute_script(click_fallback_js)
 
         return initial_state
 
@@ -2073,6 +2108,11 @@ class ImageGenerator:
                     if d.exists():
                         for f in list(d.glob("*.jpg")) + list(d.glob("*.jpeg")):
                             existing.add(str(f.resolve()))
+
+                # Tutup side panel sesi, dialog modal/onboarding, dan matikan mode agen
+                self.close_agent_panel_if_open()
+                self.dismiss_onboarding_dialog()
+                self.disable_agent_mode()
 
                 initial_state = self.submit_prompt(prompt)
                 self.capture_debug_screenshot(
